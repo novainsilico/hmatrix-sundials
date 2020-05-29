@@ -248,6 +248,7 @@ main = do
           let opts = defaultOpts method in
           [ withVsWithoutJacobian opts
           , stiffishTest opts
+          , accuracyTests opts
           , eventTests opts
           , noErrorTests opts
           , discontinuousRhsTest opts
@@ -272,6 +273,17 @@ noErrorTests opts = testGroup "Absence of error"
   | (name, prob) <- [ empty ]
   ]
 
+accuracyTests opts = testGroup "Accuracy tests"
+  [ testCase "Simple sine" $ do
+      Right r <- runKatipT ?log_env $ solve opts { minStep = 0, jacobianRepr = SparseJacobian (SparsePattern [0,1,1,0]) } simpleSine
+      forM_ ([0 .. VS.length (actualTimeGrid r) - 1] :: [Int]) $ \i -> do
+        let
+          t = actualTimeGrid r VS.! i
+          y = solutionMatrix r ! i ! 0
+          diff = abs (y - sin t)
+        when (diff > 1e-7) $
+          assertFailure $ printf "At t = %f, y = %f (diff = %.3g)" t y diff
+  ]
 stiffishTest opts = odeGoldenTest True opts "Stiffish" $
   runKatipT ?log_env $ solve opts stiffish
 
@@ -569,11 +581,21 @@ stiffish = emptyOdeProblem
   where
     lamda = -100.0
 
+simpleSine = emptyOdeProblem
+  { odeRhs = odeRhsPure $ \_t y -> [y VS.! 1, - y VS.! 0]
+  , odeJacobian = Just $ \_ _ -> (2><2)
+        [  0, 1
+        , -1, 0
+        ]
+  , odeInitCond = [0,1]
+  , odeSolTimes = VS.fromList [ 2 * pi * k / 360 | k <- [0..360]]
+  , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
+  }
+
 -- A sine wave that only changes direction once it reaches ±0.9.
 -- Illustrates event-specific reset function
 boundedSine = emptyOdeProblem
   { odeRhs = odeRhsPure $ \_t y -> [y VS.! 1, - y VS.! 0]
-  , odeJacobian = Nothing
   , odeInitCond = [0,1]
   , odeEvents = events
   , odeEventHandler = mkEventHandler
