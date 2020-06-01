@@ -594,10 +594,8 @@ simpleSine = emptyOdeProblem
 
 -- A sine wave that only changes direction once it reaches ±0.9.
 -- Illustrates event-specific reset function
-boundedSine = emptyOdeProblem
-  { odeRhs = odeRhsPure $ \_t y -> [y VS.! 1, - y VS.! 0]
-  , odeInitCond = [0,1]
-  , odeEvents = events
+boundedSine = simpleSine
+  { odeEvents = events
   , odeEventHandler = mkEventHandler
       [\_ y -> vector [ y ! 0, - abs (y ! 1) ]
       ,\_ y -> vector [ y ! 0, abs (y ! 1) ]
@@ -606,7 +604,6 @@ boundedSine = emptyOdeProblem
       (V.replicate 2 True)
   , odeMaxEvents = 100
   , odeSolTimes = VS.fromList [ 2 * pi * k / 360 | k <- [0..360]]
-  , odeTolerances = defaultTolerances
   }
   where
     events =
