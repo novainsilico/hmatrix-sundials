@@ -139,6 +139,8 @@ solveC CConsts{..} CVars{..} report_error =
   */
   double t_start = T0;
 
+  int implicit = $(int c_method) >= MIN_DIRK_NUM;
+
   /* Initialize data structures */
 
   ARKErrHandlerFn report_error = $fun:(void (*report_error)(int,const char*, const char*, char*, void*));
@@ -154,7 +156,7 @@ solveC CConsts{..} CVars{..} report_error =
   };
 
   ARKRhsFn c_rhs = $(int (*c_rhs)(double, SunVector*, SunVector*, UserData*));
-  if ($(int c_method) < MIN_DIRK_NUM) {
+  if (!implicit) {
     arkode_mem = ARKStepCreate(c_rhs, NULL, T0, y);
   } else {
     arkode_mem = ARKStepCreate(NULL, c_rhs, T0, y);
@@ -197,23 +199,25 @@ solveC CConsts{..} CVars{..} report_error =
   flag = ARKStepRootInit(arkode_mem, $(int c_n_event_specs), $fun:(int (* c_event_fn) (double t, SunVector y[], double gout[], void * params)));
   if (check_flag(&flag, "ARKStepRootInit", 1, report_error)) return(6290);
 
-  /* Initialize a jacobian matrix and solver */
-  int c_sparse_jac = $(int c_sparse_jac);
-  if (c_sparse_jac) {
-    A = SUNSparseMatrix(c_dim, c_dim, c_sparse_jac, CSC_MAT);
-    if (check_flag((void *)A, "SUNSparseMatrix", 0, report_error)) return 9061;
-    LS = SUNLinSol_KLU(y, A);
-    if (check_flag((void *)LS, "SUNLinSol_KLU", 0, report_error)) return 9316;
-  } else {
-    A = SUNDenseMatrix(c_dim, c_dim);
-    if (check_flag((void *)A, "SUNDenseMatrix", 0, report_error)) return 9061;
-    LS = SUNDenseLinearSolver(y, A);
-    if (check_flag((void *)LS, "SUNDenseLinearSolver", 0, report_error)) return 9316;
-  }
+  if (implicit) {
+    /* Initialize a jacobian matrix and solver */
+    int c_sparse_jac = $(int c_sparse_jac);
+    if (c_sparse_jac) {
+      A = SUNSparseMatrix(c_dim, c_dim, c_sparse_jac, CSC_MAT);
+      if (check_flag((void *)A, "SUNSparseMatrix", 0, report_error)) return 9061;
+      LS = SUNLinSol_KLU(y, A);
+      if (check_flag((void *)LS, "SUNLinSol_KLU", 0, report_error)) return 9316;
+    } else {
+      A = SUNDenseMatrix(c_dim, c_dim);
+      if (check_flag((void *)A, "SUNDenseMatrix", 0, report_error)) return 9061;
+      LS = SUNDenseLinearSolver(y, A);
+      if (check_flag((void *)LS, "SUNDenseLinearSolver", 0, report_error)) return 9316;
+    }
 
-  /* Attach matrix and linear solver */
-  flag = ARKStepSetLinearSolver(arkode_mem, LS, A);
-  if (check_flag(&flag, "ARKStepSetLinearSolver", 1, report_error)) return 2625;
+      /* Attach matrix and linear solver */
+      flag = ARKStepSetLinearSolver(arkode_mem, LS, A);
+      if (check_flag(&flag, "ARKStepSetLinearSolver", 1, report_error)) return 2625;
+  }
 
   /* Set the initial step size if there is one */
   if ($(int c_init_step_size_set)) {
@@ -224,7 +228,7 @@ solveC CConsts{..} CVars{..} report_error =
   }
 
   /* Set the Jacobian if there is one */
-  if ($(int c_jac_set)) {
+  if ($(int c_jac_set) && implicit) {
     flag = ARKStepSetJacFn(arkode_mem, $fun:(int (* c_jac) (double t, SunVector y[], SunVector fy[], SunMatrix Jac[], void * params, SunVector tmp1[], SunVector tmp2[], SunVector tmp3[])));
     if (check_flag(&flag, "ARKStepSetJacFn", 1, report_error)) return 3124;
   }
@@ -235,12 +239,10 @@ solveC CConsts{..} CVars{..} report_error =
     ($vec-ptr:(double *c_output_mat))[0 * (c_dim + 1) + (j + 1)] = NV_Ith_S(y,j);
   }
 
-  /* Explicitly set the method */
-  if ($(int c_method) >= MIN_DIRK_NUM) {
-    /* Implicit */
+  /* Set the Runge-Kutta method */
+  if (implicit) {
     flag = ARKStepSetTableNum(arkode_mem, $(int c_method), -1);
   } else {
-    /* Explicit */
     flag = ARKStepSetTableNum(arkode_mem, -1, $(int c_method));
   }
   if (check_flag(&flag, "ARKStepSetTableNum", 1, report_error)) return 26643;
@@ -377,7 +379,7 @@ solveC CConsts{..} CVars{..} report_error =
       t_start = t;
       if (n_events_triggered > 0 || time_based_event) {
         /* Reinitialize */
-        if ($(int c_method) < MIN_DIRK_NUM) {
+        if (!implicit) {
           flag = ARKStepReInit(arkode_mem, c_rhs, NULL, t, y);
         } else {
           flag = ARKStepReInit(arkode_mem, NULL, c_rhs, t, y);
@@ -422,17 +424,23 @@ solveC CConsts{..} CVars{..} report_error =
   check_flag(&flag, "ARKStepGetNumNonlinSolvIters", 1, report_error);
   ($vec-ptr:(sunindextype *c_diagnostics))[6] = nni;
 
-  flag = ARKStepGetNumNonlinSolvConvFails(arkode_mem, &ncfn);
-  check_flag(&flag, "ARKStepGetNumNonlinSolvConvFails", 1, report_error);
-  ($vec-ptr:(sunindextype *c_diagnostics))[7] = ncfn;
+  if (implicit) {
+    flag = ARKStepGetNumNonlinSolvConvFails(arkode_mem, &ncfn);
+    check_flag(&flag, "ARKStepGetNumNonlinSolvConvFails", 1, report_error);
+    ($vec-ptr:(sunindextype *c_diagnostics))[7] = ncfn;
 
-  flag = ARKStepGetNumJacEvals(arkode_mem, &nje);
-  check_flag(&flag, "ARKStepGetNumJacEvals", 1, report_error);
-  ($vec-ptr:(sunindextype *c_diagnostics))[8] = ncfn;
+    flag = ARKStepGetNumJacEvals(arkode_mem, &nje);
+    check_flag(&flag, "ARKStepGetNumJacEvals", 1, report_error);
+    ($vec-ptr:(sunindextype *c_diagnostics))[8] = ncfn;
 
-  flag = ARKStepGetNumLinRhsEvals(arkode_mem, &nfeLS);
-  check_flag(&flag, "ARKStepGetNumRhsEvals", 1, report_error);
-  ($vec-ptr:(sunindextype *c_diagnostics))[9] = ncfn;
+    flag = ARKStepGetNumLinRhsEvals(arkode_mem, &nfeLS);
+    check_flag(&flag, "ARKStepGetNumRhsEvals", 1, report_error);
+    ($vec-ptr:(sunindextype *c_diagnostics))[9] = ncfn;
+  } else {
+    ($vec-ptr:(sunindextype *c_diagnostics))[7] = 0;
+    ($vec-ptr:(sunindextype *c_diagnostics))[8] = 0;
+    ($vec-ptr:(sunindextype *c_diagnostics))[9] = 0;
+  }
 
   /* Clean up and return */
   N_VDestroy(y);            /* Free y vector          */
