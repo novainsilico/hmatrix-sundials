@@ -44,6 +44,7 @@ module Numeric.Sundials.Foreign
   , aRK436L2SA_DIRK_6_3_4
   , kVAERNO_7_4_5
   , aRK548L2SA_DIRK_8_4_5
+  , mIN_DIRK_NUM
   ) where
 
 import           Foreign
@@ -272,6 +273,8 @@ kVAERNO_7_4_5 :: CInt
 kVAERNO_7_4_5 = #const KVAERNO_7_4_5
 aRK548L2SA_DIRK_8_4_5 :: CInt
 aRK548L2SA_DIRK_8_4_5 = #const ARK548L2SA_DIRK_8_4_5
+mIN_DIRK_NUM :: CInt
+mIN_DIRK_NUM = #const MIN_DIRK_NUM
 
 -- #define DEFAULT_DIRK_2          SDIRK_2_1_2
 -- #define DEFAULT_DIRK_3          ARK324L2SA_DIRK_4_2_3

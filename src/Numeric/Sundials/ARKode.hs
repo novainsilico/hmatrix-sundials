@@ -87,6 +87,10 @@ instance Method ARKMethod where
   methodToInt FEHLBERG_13_7_8         = fEHLBERG_13_7_8
 
   methodSolver = ARKode
+  methodType method =
+    if methodToInt method < mIN_DIRK_NUM
+      then Explicit
+      else Implicit
 
 solveC :: CConsts -> CVars (VS.MVector RealWorld) -> ReportErrorFn -> IO CInt
 solveC CConsts{..} CVars{..} report_error =

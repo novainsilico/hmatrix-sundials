@@ -142,9 +142,13 @@ data CConsts = CConsts
 data Solver = CVode | ARKode
   deriving Show
 
+data MethodType = Explicit | Implicit
+  deriving (Show, Eq)
+
 class Method method where
   methodToInt :: method -> CInt
   methodSolver :: Solver
+  methodType :: method -> MethodType
 
 withCConsts
   :: Method method

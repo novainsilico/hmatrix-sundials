@@ -42,6 +42,7 @@ instance Method CVMethod where
   methodToInt ADAMS = cV_ADAMS
   methodToInt BDF   = cV_BDF
   methodSolver = CVode
+  methodType _ = Implicit
 
 solveC :: CConsts -> CVars (VS.MVector RealWorld) -> ReportErrorFn -> IO CInt
 solveC CConsts{..} CVars{..} report_error =

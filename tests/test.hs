@@ -54,7 +54,7 @@ data OdeSolver = forall method . (Show method, Method method) => OdeSolver
 availableSolvers :: [OdeSolver]
 availableSolvers =
   [ OdeSolver "CVode"  [BDF, ADAMS]
-  , OdeSolver "ARKode" [SDIRK_5_3_4, TRBDF2_3_3_2]
+  , OdeSolver "ARKode" [SDIRK_5_3_4, TRBDF2_3_3_2, FEHLBERG_6_4_5]
   ]
 
 defaultOpts :: method -> ODEOpts method
@@ -247,7 +247,6 @@ main = do
       [ testGroup (show method) $
           let opts = defaultOpts method in
           [ withVsWithoutJacobian opts
-          , stiffishTest opts
           , accuracyTests opts
           , eventTests opts
           , noErrorTests opts
@@ -258,7 +257,13 @@ main = do
           , timeBasedEventTest opts
           , timeGridTest opts
           , timeAliasingTests opts
-          ]
+          ] ++
+          (if methodType (odeMethod opts) == Implicit
+           then
+            [ stiffishTest opts
+            ]
+           else [])
+
       | method <- methods
       ]
     | OdeSolver solver_name methods <- availableSolvers
@@ -302,9 +307,12 @@ withVsWithoutJacobian opts0 = testGroup "With vs without jacobian"
         prob { odeJacobian = Nothing }
       checkDiscrepancy 1e-2 $ norm_2 (solJac - solNoJac)
   | ((name, prob), spat) <-
+      if (methodType (odeMethod opts0) == Implicit)
+      then
       [ (brusselator, brusselator_sparse_pattern)
       , (robertson, robertson_sparse_pattern)
       ]
+      else []
   , sparse <- [False, True]
   ]
   where
