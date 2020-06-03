@@ -6,6 +6,7 @@ module Numeric.Sundials
   , CVMethod(..)
   , Method(..)
   , MethodType(..)
+  , Solver(..)
   , module Numeric.Sundials.Types
   ) where
 
