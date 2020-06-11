@@ -154,7 +154,9 @@ instance Storable SparseMatrix where
           in_ix = fromIntegral $ cur_row + cur_col * rows
           non_zero = (spat VS.! in_ix) /= 0
           val = vals VS.! in_ix
-        when non_zero $ do
+        -- Make sure the diagonal entries are always allocated, to be able
+        -- to store the I - γJ matrix.
+        when (non_zero || cur_row == cur_col) $ do
           out_ix <- readIORef out_ix_ref
           writeIORef out_ix_ref $! out_ix+1
           pokeElemOff data_ out_ix (coerce val)

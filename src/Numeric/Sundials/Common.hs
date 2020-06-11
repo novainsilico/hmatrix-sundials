@@ -207,7 +207,10 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
                           SparseJacobian spat -> poke (castPtr jacS) (T.SparseMatrix spat j)
                         return 0
     c_sparse_jac = case jacobianRepr of
-      SparseJacobian (T.SparsePattern spat) -> VS.sum (VS.map fromIntegral spat)
+      SparseJacobian (T.SparsePattern spat) ->
+        VS.sum (VS.map fromIntegral spat) +
+        -- additionally, add diagonal zeros, as they'll be allocated too
+        sum [ if spat VS.! (i + i * dim) == 0 then 1 else 0 | i <- [0 .. dim-1] ]
       DenseJacobian -> 0
     c_method = methodToInt odeMethod
 
