@@ -19,6 +19,7 @@ module Numeric.Sundials.Types
   , EventSpec(..)
   , TimeEventSpec(..)
   , SunVector(..)
+  , SunMatrix(..)
   , SunIndexType
   , SunRealType
   , sunContentLengthOffset
@@ -102,7 +103,7 @@ type OdeRhsCType = CDouble -> Ptr SunVector -> Ptr SunVector -> Ptr UserData -> 
 
 data UserData
 
--- | The right-hand side of the ODE system.
+-- | The right-hand side of an ODE system.
 --
 -- Can be either a Haskell function or a pointer to a C function.
 data OdeRhs
@@ -215,7 +216,10 @@ sunTypesTable :: Map.Map TypeSpecifier TH.TypeQ
 sunTypesTable = Map.fromList
   [
     (TypeName "sunindextype", [t| SunIndexType |] )
+  , (TypeName "realtype",     [t| SunRealType |] )
+  , (TypeName "N_Vector",     [t| SunVector |] )
   , (TypeName "SunVector",    [t| SunVector |] )
+  , (TypeName "SUNMatrix",    [t| SunMatrix |] )
   , (TypeName "SunMatrix",    [t| SunMatrix |] )
   , (TypeName "UserData",     [t| UserData |] )
   ]

@@ -12,7 +12,7 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Storable.Mutable as VSM
 import Data.Maybe
-import Numeric.LinearAlgebra.HMatrix hiding (Vector)
+import Numeric.LinearAlgebra.HMatrix as H hiding (Vector)
 import GHC.Prim
 import Control.Monad.IO.Class
 import Control.Monad.Cont
@@ -234,8 +234,8 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
 matrixToSunMatrix :: Matrix Double -> T.SunMatrix
 matrixToSunMatrix m = T.SunMatrix { T.rows = nr, T.cols = nc, T.vals = vs }
   where
-    nr = fromIntegral $ rows m
-    nc = fromIntegral $ cols m
+    nr = fromIntegral $ H.rows m
+    nc = fromIntegral $ H.cols m
     vs = coerce . VS.concat $ toColumns m
 
 -- Contrary to the documentation, it appears that CVodeGetRootInfo
