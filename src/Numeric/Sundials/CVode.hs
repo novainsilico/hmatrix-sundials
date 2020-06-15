@@ -31,7 +31,6 @@ C.include "<cvode/cvode_direct.h>"
 C.include "<sundials/sundials_types.h>"
 C.include "<sundials/sundials_math.h>"
 C.include "../../helpers.h"
-C.include "Numeric/Sundials/Foreign_hsc.h"
 
 -- | Available methods for CVode
 data CVMethod = ADAMS
@@ -113,7 +112,7 @@ solveC CConsts{..} CVars{..} report_error =
   // NB: Uses the Newton solver by default
   cvode_mem = CVodeCreate($(int c_method));
   if (check_flag((void *)cvode_mem, "CVodeCreate", 0, report_error)) return(8396);
-  flag = CVodeInit(cvode_mem, $(int (* c_rhs) (double t, SunVector y[], SunVector dydt[], UserData* params)), T0, y);
+  flag = CVodeInit(cvode_mem, $(int (* c_rhs) (realtype, N_Vector, N_Vector, UserData*)), T0, y);
   if (check_flag(&flag, "CVodeInit", 1, report_error)) return(1960);
 
   /* Set the error handler */
@@ -143,7 +142,7 @@ solveC CConsts{..} CVars{..} report_error =
   if (check_flag(&flag, "CVodeSVtolerances", 1, report_error)) return(6212);
 
   /* Specify the root function */
-  flag = CVodeRootInit(cvode_mem, $(int c_n_event_specs), $fun:(int (* c_event_fn) (double t, SunVector y[], double gout[], void * params)));
+  flag = CVodeRootInit(cvode_mem, $(int c_n_event_specs), $fun:(int (* c_event_fn) (double t, N_Vector y, double gout[], void * params)));
   if (check_flag(&flag, "CVodeRootInit", 1, report_error)) return(6290);
 
   /* Initialize a jacobian matrix and solver */
@@ -174,7 +173,7 @@ solveC CConsts{..} CVars{..} report_error =
 
   /* Set the Jacobian if there is one */
   if ($(int c_jac_set)) {
-    flag = CVDlsSetJacFn(cvode_mem, $fun:(int (* c_jac) (double t, SunVector y[], SunVector fy[], SunMatrix Jac[], void * params, SunVector tmp1[], SunVector tmp2[], SunVector tmp3[])));
+    flag = CVDlsSetJacFn(cvode_mem, $fun:(int (* c_jac) (double t, N_Vector y, N_Vector fy, SUNMatrix Jac, UserData *params, N_Vector tmp1, N_Vector tmp2, N_Vector tmp3)));
     if (check_flag(&flag, "CVDlsSetJacFn", 1, report_error)) return 3124;
   }
 
@@ -278,7 +277,7 @@ solveC CConsts{..} CVars{..} report_error =
       int record_events = 0;
       if (n_events_triggered > 0 || time_based_event) {
         /* Update the state with the supplied function */
-        $fun:(int (* c_apply_event) (int, int*, double, SunVector y[], SunVector z[], int*, int*))(n_events_triggered, c_root_info, t, y, y, &stop_solver, &record_events);
+        $fun:(int (* c_apply_event) (int, int*, double, N_Vector y, N_Vector z, int*, int*))(n_events_triggered, c_root_info, t, y, y, &stop_solver, &record_events);
       }
 
       if (record_events) {

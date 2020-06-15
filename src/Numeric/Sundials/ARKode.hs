@@ -31,7 +31,6 @@ C.include "<sunlinsol/sunlinsol_klu.h>"
 C.include "<sundials/sundials_types.h>"
 C.include "<sundials/sundials_math.h>"
 C.include "../../helpers.h"
-C.include "Numeric/Sundials/Foreign_hsc.h"
 
 -- | Available methods for ARKode
 data ARKMethod = SDIRK_2_1_2
@@ -98,7 +97,7 @@ solveC CConsts{..} CVars{..} report_error =
   /* general problem variables */
 
   int flag;                  /* reusable error-checking flag                 */
-  int retval = CV_SUCCESS;
+  int retval = ARK_SUCCESS;
 
   int i, j;                  /* reusable loop indices                        */
   N_Vector y = NULL;         /* empty vector for storing solution            */
@@ -155,7 +154,7 @@ solveC CConsts{..} CVars{..} report_error =
     NV_Ith_S(y,i) = ($vec-ptr:(double *c_init_cond))[i];
   };
 
-  ARKRhsFn c_rhs = $(int (*c_rhs)(double, SunVector*, SunVector*, UserData*));
+  ARKRhsFn c_rhs = $(int (*c_rhs)(double, N_Vector, N_Vector, UserData*));
   if (!implicit) {
     arkode_mem = ARKStepCreate(c_rhs, NULL, T0, y);
   } else {
@@ -196,7 +195,7 @@ solveC CConsts{..} CVars{..} report_error =
   if (check_flag(&flag, "ARKStepSVtolerances", 1, report_error)) return(6212);
 
   /* Specify the root function */
-  flag = ARKStepRootInit(arkode_mem, $(int c_n_event_specs), $fun:(int (* c_event_fn) (double t, SunVector y[], double gout[], void * params)));
+  flag = ARKStepRootInit(arkode_mem, $(int c_n_event_specs), $fun:(int (* c_event_fn) (double t, N_Vector y, double *gout, void * params)));
   if (check_flag(&flag, "ARKStepRootInit", 1, report_error)) return(6290);
 
   if (implicit) {
@@ -229,7 +228,7 @@ solveC CConsts{..} CVars{..} report_error =
 
   /* Set the Jacobian if there is one */
   if ($(int c_jac_set) && implicit) {
-    flag = ARKStepSetJacFn(arkode_mem, $fun:(int (* c_jac) (double t, SunVector y[], SunVector fy[], SunMatrix Jac[], void * params, SunVector tmp1[], SunVector tmp2[], SunVector tmp3[])));
+    flag = ARKStepSetJacFn(arkode_mem, $fun:(int (* c_jac) (double, N_Vector, N_Vector, SUNMatrix, UserData*, N_Vector, N_Vector, N_Vector)));
     if (check_flag(&flag, "ARKStepSetJacFn", 1, report_error)) return 3124;
   }
 
@@ -341,7 +340,7 @@ solveC CConsts{..} CVars{..} report_error =
       int record_events = 0;
       if (n_events_triggered > 0 || time_based_event) {
         /* Update the state with the supplied function */
-        $fun:(int (* c_apply_event) (int, int*, double, SunVector y[], SunVector z[], int*, int*))(n_events_triggered, c_root_info, t, y, y, &stop_solver, &record_events);
+        $fun:(int (* c_apply_event) (int, int*, double, N_Vector y, N_Vector z, int*, int*))(n_events_triggered, c_root_info, t, y, y, &stop_solver, &record_events);
       }
 
       if (record_events) {

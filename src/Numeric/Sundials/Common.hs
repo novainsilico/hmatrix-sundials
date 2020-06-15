@@ -122,7 +122,7 @@ data CConsts = CConsts
       -> IO CInt
   , c_jac_set :: CInt
   , c_jac :: CDouble -> Ptr T.SunVector -> Ptr T.SunVector -> Ptr T.SunMatrix
-          -> Ptr () -> Ptr T.SunVector -> Ptr T.SunVector -> Ptr T.SunVector
+          -> Ptr UserData -> Ptr T.SunVector -> Ptr T.SunVector -> Ptr T.SunVector
           -> IO CInt
   , c_sparse_jac :: CInt
       -- ^ If 0, use a dense matrix.

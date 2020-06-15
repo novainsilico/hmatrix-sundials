@@ -68,6 +68,18 @@ import Text.Printf (printf)
 #include <arkode/arkode_arkstep.h>
 #include <cvode/cvode.h>
 
+-- A version of #type that produces CDouble etc.
+-- https://github.com/haskell/hsc2hs/issues/51
+#define hsc_ctype(t...)                                     \
+    if ((t)(int)(t)1.4 == (t)1.4)                           \
+        hsc_printf ("%s%lu",                                \
+                (t)(-1) < (t)0 ? "Int" : "Word",            \
+                (unsigned long)sizeof (t) * 8);             \
+    else                                                    \
+        hsc_printf ("%s",                                   \
+                sizeof (t) >  sizeof (double) ? "LDouble" : \
+                sizeof (t) == sizeof (double) ? "CDouble" : \
+                "CFloat");
 
 data SunVector = SunVector
   { sunVecN    :: SunIndexType
@@ -89,8 +101,8 @@ newtype SparsePattern = SparsePattern (VS.Vector Int8)
 -- | A sparse matrix
 data SparseMatrix = SparseMatrix SparsePattern SunMatrix
 
-type SunIndexType = #type sunindextype
-type SunRealType = #type realtype
+type SunIndexType = #ctype sunindextype
+type SunRealType = #ctype realtype
 
 getMatrixDataFromContents :: Ptr SunMatrix -> IO SunMatrix
 getMatrixDataFromContents ptr = do
@@ -130,15 +142,15 @@ instance Storable SunMatrix where
 instance Storable SparseMatrix where
   poke p (SparseMatrix (SparsePattern spat) SunMatrix{..}) = do
     content_ptr <- getContentMatrixPtr p
-    sparse_type :: CInt <- #{peek SunMatrixContentSparse, sparsetype} content_ptr
+    sparse_type :: CInt <- #{peek struct _SUNMatrixContent_Sparse, sparsetype} content_ptr
     unless (sparse_type == cSC_MAT) $
       throwIO . ErrorCall $ printf "Sparse SUNMatrix poke: only CSC matrices are supported, got %d" (fromIntegral sparse_type :: Int)
-    #{poke SunMatrixContentSparse, M} content_ptr rows
-    #{poke SunMatrixContentSparse, N} content_ptr cols
-    indexvals :: Ptr SunIndexType <- #{peek SunMatrixContentSparse, indexvals} content_ptr
-    indexptrs :: Ptr SunIndexType <- #{peek SunMatrixContentSparse, indexptrs} content_ptr
-    data_ :: Ptr SunRealType <- #{peek SunMatrixContentSparse, data} content_ptr
-    max_entries :: SunIndexType <- #{peek SunMatrixContentSparse, NNZ} content_ptr
+    #{poke struct _SUNMatrixContent_Sparse, M} content_ptr rows
+    #{poke struct _SUNMatrixContent_Sparse, N} content_ptr cols
+    indexvals :: Ptr SunIndexType <- #{peek struct _SUNMatrixContent_Sparse, indexvals} content_ptr
+    indexptrs :: Ptr SunIndexType <- #{peek struct _SUNMatrixContent_Sparse, indexptrs} content_ptr
+    data_ :: Ptr SunRealType <- #{peek struct _SUNMatrixContent_Sparse, data} content_ptr
+    max_entries :: SunIndexType <- #{peek struct _SUNMatrixContent_Sparse, NNZ} content_ptr
 
     when (VS.any (`notElem` [0,1]) spat) $
       throwIO $ ErrorCall $ "Illegal sparse pattern: " ++ show spat
@@ -194,46 +206,39 @@ putDataInContents vec len ptr = do
   putLength (fromIntegral len) qtr
   vectorToC vec len rtr
 
-#def typedef struct _generic_N_Vector SunVector;
-#def typedef struct _N_VectorContent_Serial SunContent;
-
-#def typedef struct _generic_SUNMatrix SunMatrix;
-#def typedef struct _SUNMatrixContent_Dense SunMatrixContent;
-#def typedef struct _SUNMatrixContent_Sparse SunMatrixContentSparse;
-
 sunContentLengthOffset :: Int
-sunContentLengthOffset = #offset SunContent, length
+sunContentLengthOffset = #offset struct _N_VectorContent_Serial, length
 
 sunContentDataOffset :: Int
-sunContentDataOffset = #offset SunContent, data
+sunContentDataOffset = #offset struct _N_VectorContent_Serial, data
 
 getContentMatrixPtr :: Storable a => Ptr b -> IO a
-getContentMatrixPtr ptr = (#peek SunMatrix, content) ptr
+getContentMatrixPtr ptr = (#peek struct _generic_SUNMatrix, content) ptr
 
 getNRows :: Ptr b -> IO SunIndexType
-getNRows ptr = (#peek SunMatrixContent, M) ptr
+getNRows ptr = (#peek struct _SUNMatrixContent_Dense, M) ptr
 putNRows :: SunIndexType -> Ptr b -> IO ()
-putNRows nr ptr = (#poke SunMatrixContent, M) ptr nr
+putNRows nr ptr = (#poke struct _SUNMatrixContent_Dense, M) ptr nr
 
 getNCols :: Ptr b -> IO SunIndexType
-getNCols ptr = (#peek SunMatrixContent, N) ptr
+getNCols ptr = (#peek struct _SUNMatrixContent_Dense, N) ptr
 putNCols :: SunIndexType -> Ptr b -> IO ()
-putNCols nc ptr = (#poke SunMatrixContent, N) ptr nc
+putNCols nc ptr = (#poke struct _SUNMatrixContent_Dense, N) ptr nc
 
 getMatrixData :: Storable a => Ptr b -> IO a
-getMatrixData ptr = (#peek SunMatrixContent, data) ptr
+getMatrixData ptr = (#peek struct _SUNMatrixContent_Dense, data) ptr
 
 getContentPtr :: Storable a => Ptr b -> IO a
-getContentPtr ptr = (#peek SunVector, content) ptr
+getContentPtr ptr = (#peek struct _generic_N_Vector, content) ptr
 
 getData :: Storable a => Ptr b -> IO a
-getData ptr = (#peek SunContent, data) ptr
+getData ptr = (#peek struct _N_VectorContent_Serial, data) ptr
 
 getLength :: Ptr b -> IO SunIndexType
-getLength ptr = (#peek SunContent, length) ptr
+getLength ptr = (#peek struct _N_VectorContent_Serial, length) ptr
 
 putLength :: SunIndexType -> Ptr b -> IO ()
-putLength l ptr = (#poke SunContent, length) ptr l
+putLength l ptr = (#poke struct _N_VectorContent_Serial, length) ptr l
 
 cV_SUCCESS :: CInt
 cV_SUCCESS = #const CV_SUCCESS

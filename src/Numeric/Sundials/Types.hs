@@ -217,10 +217,8 @@ sunTypesTable = Map.fromList
   [
     (TypeName "sunindextype", [t| SunIndexType |] )
   , (TypeName "realtype",     [t| SunRealType |] )
-  , (TypeName "N_Vector",     [t| SunVector |] )
-  , (TypeName "SunVector",    [t| SunVector |] )
-  , (TypeName "SUNMatrix",    [t| SunMatrix |] )
-  , (TypeName "SunMatrix",    [t| SunMatrix |] )
+  , (TypeName "N_Vector",     [t| Ptr SunVector |] )
+  , (TypeName "SUNMatrix",    [t| Ptr SunMatrix |] )
   , (TypeName "UserData",     [t| UserData |] )
   ]
 
