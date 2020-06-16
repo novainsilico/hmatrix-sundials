@@ -121,9 +121,7 @@ data CConsts = CConsts
       -> Ptr CInt -- (out) record the event?
       -> IO CInt
   , c_jac_set :: CInt
-  , c_jac :: CDouble -> Ptr T.SunVector -> Ptr T.SunVector -> Ptr T.SunMatrix
-          -> Ptr UserData -> Ptr T.SunVector -> Ptr T.SunVector -> Ptr T.SunVector
-          -> IO CInt
+  , c_jac :: FunPtr OdeJacobianCType
   , c_sparse_jac :: CInt
       -- ^ If 0, use a dense matrix.
       -- If non-0, use a sparse matrix with that number of non-zero
@@ -198,14 +196,6 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
     c_max_events = fromIntegral odeMaxEvents
     c_next_time_event = coerce odeTimeBasedEvents
     c_jac_set = fromIntegral . fromEnum $ isJust odeJacobian
-    c_jac t y _fy jacS _ptr _tmp1 _tmp2 _tmp3 = do
-      case odeJacobian of
-        Nothing   -> undefined
-        Just jacI -> do j <- matrixToSunMatrix . jacI (coerce t) <$> (coerce $ sunVecVals <$> peek y)
-                        case jacobianRepr of
-                          DenseJacobian -> poke jacS j
-                          SparseJacobian spat -> poke (castPtr jacS) (T.SparseMatrix spat j)
-                        return 0
     c_sparse_jac = case jacobianRepr of
       SparseJacobian (T.SparsePattern spat) ->
         VS.sum (VS.map fromIntegral spat) +
@@ -219,7 +209,7 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
       OdeRhsC ptr u -> return (ptr, u)
       OdeRhsHaskell fun -> do
         let
-          funIO :: CDouble -> Ptr T.SunVector -> Ptr T.SunVector -> Ptr UserData -> IO CInt
+          funIO :: OdeRhsCType
           funIO t y f _ptr = do
             sv <- peek y
             r <- fun t (sunVecVals sv)
@@ -229,6 +219,25 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
             return 0
         funptr <- ContT $ bracket (mkOdeRhsC funIO) freeHaskellFunPtr
         return (funptr, nullPtr)
+  c_jac <-
+      case odeJacobian of
+        Nothing   -> return nullFunPtr
+        Just (OdeJacobianC fptr) -> return fptr
+        Just (OdeJacobianHaskell jac_fn) -> do
+        let
+          funIO :: OdeJacobianCType
+          funIO t y_ptr _fy_ptr jac_ptr _userdata _tmp1 _tmp2 _tmp3 = do
+            y <- peek y_ptr
+            let jac = matrixToSunMatrix $
+                  jac_fn
+                    (coerce t :: Double)
+                    (coerce $ sunVecVals y :: VS.Vector Double)
+            case jacobianRepr of
+              DenseJacobian -> poke jac_ptr jac
+              SparseJacobian spat -> poke (castPtr jac_ptr) (T.SparseMatrix spat jac)
+            return 0
+        funptr <- ContT $ bracket (mkOdeJacobianC funIO) freeHaskellFunPtr
+        return funptr
   return CConsts{..}
 
 matrixToSunMatrix :: Matrix Double -> T.SunMatrix
@@ -259,6 +268,9 @@ directionToInt d =
 
 foreign import ccall "wrapper"
   mkOdeRhsC :: OdeRhsCType -> IO (FunPtr OdeRhsCType)
+
+foreign import ccall "wrapper"
+  mkOdeJacobianC :: OdeJacobianCType -> IO (FunPtr OdeJacobianCType)
 
 assembleSolverResult
   :: OdeProblem

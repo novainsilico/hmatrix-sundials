@@ -506,7 +506,7 @@ brusselator = (,) "brusselator" $ emptyOdeProblem
       , w * u - v * u * u
       , (b - w) / eps - w * u
       ]
-  , odeJacobian = Just $ \(_t :: Double) x ->
+  , odeJacobian = Just . OdeJacobianHaskell $ \(_t :: Double) x ->
       let
         u = x VS.! 0
         v = x VS.! 1
@@ -552,7 +552,7 @@ robertson = (,) "Robertson" $ emptyOdeProblem
       , 0.04 * y1 - 1.0e4 * y2 * y3 - 3.0e7 * (y2)^(2 :: Int)
       , 3.0e7 * (y2)^(2 :: Int)
       ]
-  , odeJacobian = Just $ \_t (VS.toList -> [_, y2, y3]) -> (3 >< 3)
+  , odeJacobian = Just . OdeJacobianHaskell $ \_t (VS.toList -> [_, y2, y3]) -> (3 >< 3)
       [ -0.04, 1.0e4 * y3, 1.0e4 * y2
       , 0.04, -1.0e4*y3 - 3.0e7*2*y2, -1.0e4*y2
       , 0, 3.0e7*2*y2, 0
@@ -591,7 +591,7 @@ stiffish = emptyOdeProblem
 
 simpleSine = emptyOdeProblem
   { odeRhs = odeRhsPure $ \_t y -> [y VS.! 1, - y VS.! 0]
-  , odeJacobian = Just $ \_ _ -> (2><2)
+  , odeJacobian = Just . OdeJacobianHaskell $ \_ _ -> (2><2)
         [  0, 1
         , -1, 0
         ]

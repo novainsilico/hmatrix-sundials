@@ -228,7 +228,8 @@ solveC CConsts{..} CVars{..} report_error =
 
   /* Set the Jacobian if there is one */
   if ($(int c_jac_set) && implicit) {
-    flag = ARKStepSetJacFn(arkode_mem, $fun:(int (* c_jac) (double, N_Vector, N_Vector, SUNMatrix, UserData*, N_Vector, N_Vector, N_Vector)));
+    ARKLsJacFn c_jac = $(int (*c_jac)(realtype, N_Vector, N_Vector, SUNMatrix, UserData*, N_Vector, N_Vector, N_Vector));
+    flag = ARKStepSetJacFn(arkode_mem, c_jac);
     if (check_flag(&flag, "ARKStepSetJacFn", 1, report_error)) return 3124;
   }
 

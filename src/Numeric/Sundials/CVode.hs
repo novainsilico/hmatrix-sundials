@@ -173,7 +173,8 @@ solveC CConsts{..} CVars{..} report_error =
 
   /* Set the Jacobian if there is one */
   if ($(int c_jac_set)) {
-    flag = CVDlsSetJacFn(cvode_mem, $fun:(int (* c_jac) (double t, N_Vector y, N_Vector fy, SUNMatrix Jac, UserData *params, N_Vector tmp1, N_Vector tmp2, N_Vector tmp3)));
+    CVLsJacFn c_jac = $(int (*c_jac)(realtype, N_Vector, N_Vector, SUNMatrix, UserData*, N_Vector, N_Vector, N_Vector));
+    flag = CVDlsSetJacFn(cvode_mem, c_jac);
     if (check_flag(&flag, "CVDlsSetJacFn", 1, report_error)) return 3124;
   }
 

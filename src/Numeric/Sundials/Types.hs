@@ -6,8 +6,9 @@ module Numeric.Sundials.Types
   , OdeRhsCType
   , OdeRhs(..)
   , odeRhsPure
+  , OdeJacobianCType
+  , OdeJacobian(..)
   , UserData
-  , Jacobian
   , JacobianRepr(..)
   , SparsePattern(..)
   , ODEOpts(..)
@@ -78,7 +79,7 @@ data OdeProblem = OdeProblem
   , odeRhs :: OdeRhs
     -- ^ The right-hand side of the system: either a Haskell function or
     -- a pointer to a compiled function.
-  , odeJacobian :: Maybe (Double -> Vector Double -> Matrix Double)
+  , odeJacobian :: Maybe OdeJacobian
     -- ^ The optional Jacobian (the arguments are the time and the state
     -- vector).
   , odeInitCond :: VS.Vector Double
@@ -116,7 +117,23 @@ odeRhsPure
   -> OdeRhs
 odeRhsPure f = OdeRhsHaskell $ \t y -> return $ f t y
 
-type Jacobian = Double -> Vector Double -> Matrix Double
+type OdeJacobianCType
+  =  SunRealType   -- ^ @realtype t@
+  -> Ptr SunVector -- ^ @N_Vector y@
+  -> Ptr SunVector -- ^ @N_Vector fy@
+  -> Ptr SunMatrix -- ^ @SUNMatrix Jac@
+  -> Ptr UserData  -- ^ @void *user_data@
+  -> Ptr SunVector -- ^ @N_Vector tmp1@
+  -> Ptr SunVector -- ^ @N_Vector tmp2@
+  -> Ptr SunVector -- ^ @N_Vector tmp3@
+  -> IO CInt       -- ^ return value (0 if successful, >0 for a recoverable error, <0 for an unrecoverable error)
+
+-- | The Jacobian of the right-hand side of an ODE system.
+--
+-- Can be either a Haskell function or a pointer to a C function.
+data OdeJacobian
+  = OdeJacobianHaskell (Double -> Vector Double -> Matrix Double)
+  | OdeJacobianC (FunPtr OdeJacobianCType)
 
 data JacobianRepr
   = SparseJacobian !SparsePattern -- ^ sparse Jacobian with the given sparse pattern
