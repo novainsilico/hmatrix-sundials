@@ -335,7 +335,7 @@ solveCommon solve_c opts problem@(OdeProblem{..})
     return . Right $ SundialsSolution
       { actualTimeGrid = odeSolTimes
       , solutionMatrix = (VS.length odeSolTimes >< 0) []
-      , diagnostics = emptyDiagnostics
+      , diagnostics = mempty
       }
 
   | otherwise = do

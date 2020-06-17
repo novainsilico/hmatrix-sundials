@@ -14,7 +14,6 @@ module Numeric.Sundials.Types
   , ODEOpts(..)
   , SundialsDiagnostics(..)
   , ErrorDiagnostics(..)
-  , emptyDiagnostics
   , SundialsSolution(..)
   , CrossingDirection(..)
   , EventSpec(..)
@@ -177,10 +176,51 @@ data SundialsDiagnostics = SundialsDiagnostics {
   , dlsGetNumJacEvals            :: Int
   , dlsGetNumRhsEvals            :: Int
   , odeMaxEventsReached          :: Bool
-  } deriving Show
+  } deriving (Eq, Show, Generic, NFData)
 
-emptyDiagnostics :: SundialsDiagnostics
-emptyDiagnostics = SundialsDiagnostics 0 0 0 0 0 0 0 0 0 0 False
+instance Semigroup SundialsDiagnostics where
+   (<>) (SundialsDiagnostics
+          numSteps_1
+          numStepAttempts_1
+          numRhsEvals_fe_1
+          numRhsEvals_fi_1
+          numLinSolvSetups_1
+          numErrTestFails_1
+          numNonlinSolvIters_1
+          numNonlinSolvConvFails_1
+          numJacEvals_1
+          numRhsEvals_1
+          reachedMaxEvents_1)
+
+        (SundialsDiagnostics
+          numSteps_2
+          numStepAttempts_2
+          numRhsEvals_fe_2
+          numRhsEvals_fi_2
+          numLinSolvSetups_2
+          numErrTestFails_2
+          numNonlinSolvIters_2
+          numNonlinSolvConvFails_2
+          numJacEvals_2
+          numRhsEvals_2
+          reachedMaxEvents_2)
+
+      = SundialsDiagnostics
+          (numSteps_2 + numSteps_1)
+          (numStepAttempts_2 + numStepAttempts_1)
+          (numRhsEvals_fe_2 + numRhsEvals_fe_1)
+          (numRhsEvals_fi_2 + numRhsEvals_fi_1)
+          (numLinSolvSetups_2 + numLinSolvSetups_1)
+          (numErrTestFails_2 + numErrTestFails_1)
+          (numNonlinSolvIters_2 + numNonlinSolvIters_1)
+          (numNonlinSolvConvFails_2 + numNonlinSolvConvFails_1)
+          (numJacEvals_2 + numJacEvals_1)
+          (numRhsEvals_2 + numRhsEvals_1)
+          (reachedMaxEvents_1 || reachedMaxEvents_2)
+
+instance Monoid SundialsDiagnostics
+  where
+    mempty = SundialsDiagnostics 0 0 0 0 0 0 0 0 0 0 False
 
 data SundialsSolution =
   SundialsSolution
