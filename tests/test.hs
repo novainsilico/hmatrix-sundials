@@ -97,7 +97,6 @@ deriving instance Generic SundialsSolution
 instance ToJSON SundialsSolution
 instance FromJSON SundialsSolution
 
-deriving instance Generic SundialsDiagnostics
 instance ToJSON SundialsDiagnostics
 instance FromJSON SundialsDiagnostics
 
