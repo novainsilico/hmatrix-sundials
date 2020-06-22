@@ -22,8 +22,8 @@ module Numeric.Sundials.Types
   , SunMatrix(..)
   , SunIndexType
   , SunRealType
-  , sunContentLengthOffset
-  , sunContentDataOffset
+  , nvectorContentSerialLengthOffset
+  , nvectorContentSerialDataOffset
   , sunCtx
   )
   where
@@ -43,8 +43,8 @@ import           Language.C.Inline.Context
 import           Numeric.Sundials.Foreign (SunVector(..), SunMatrix(..),
                                           SunIndexType, SunRealType,
                                           SparsePattern(..),
-                                          sunContentLengthOffset,
-                                          sunContentDataOffset)
+                                          nvectorContentSerialLengthOffset,
+                                          nvectorContentSerialDataOffset)
 import GHC.Generics (Generic)
 
 data EventHandlerResult = EventHandlerResult

@@ -18,8 +18,8 @@ module Numeric.Sundials.Foreign
   , SparsePattern(..)
   , SparseMatrix(..)
   , SunVector(..)
-  , sunContentLengthOffset
-  , sunContentDataOffset
+  , nvectorContentSerialLengthOffset
+  , nvectorContentSerialDataOffset
   , hEUN_EULER_2_1_2
   , bOGACKI_SHAMPINE_4_2_3
   , aRK324L2SA_ERK_4_2_3
@@ -206,11 +206,11 @@ putDataInContents vec len ptr = do
   putLength (fromIntegral len) qtr
   vectorToC vec len rtr
 
-sunContentLengthOffset :: Int
-sunContentLengthOffset = #offset struct _N_VectorContent_Serial, length
+nvectorContentSerialLengthOffset :: Int
+nvectorContentSerialLengthOffset = #offset struct _N_VectorContent_Serial, length
 
-sunContentDataOffset :: Int
-sunContentDataOffset = #offset struct _N_VectorContent_Serial, data
+nvectorContentSerialDataOffset :: Int
+nvectorContentSerialDataOffset = #offset struct _N_VectorContent_Serial, data
 
 getContentMatrixPtr :: Storable a => Ptr b -> IO a
 getContentMatrixPtr ptr = (#peek struct _generic_SUNMatrix, content) ptr
