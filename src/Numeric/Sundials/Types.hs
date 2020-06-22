@@ -22,8 +22,11 @@ module Numeric.Sundials.Types
   , SunMatrix(..)
   , SunIndexType
   , SunRealType
+  , nvectorContentOffset
   , nvectorContentSerialLengthOffset
   , nvectorContentSerialDataOffset
+  , sunmatrixContentOffset
+  , sunmatrixContentDenseDataOffset
   , sunCtx
   )
   where
@@ -40,11 +43,7 @@ import           Foreign.C.Types
 import           Foreign.Ptr
 import           Language.C.Types as CT
 import           Language.C.Inline.Context
-import           Numeric.Sundials.Foreign (SunVector(..), SunMatrix(..),
-                                          SunIndexType, SunRealType,
-                                          SparsePattern(..),
-                                          nvectorContentSerialLengthOffset,
-                                          nvectorContentSerialDataOffset)
+import           Numeric.Sundials.Foreign
 import GHC.Generics (Generic)
 
 data EventHandlerResult = EventHandlerResult
