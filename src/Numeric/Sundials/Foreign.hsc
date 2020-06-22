@@ -215,19 +215,19 @@ putDataInContents vec len ptr = do
 --                           Offsets
 ----------------------------------------------------------------------
 
-nvectorContentOffset :: Int
+nvectorContentOffset :: Num a => a
 nvectorContentOffset = #offset struct _generic_N_Vector, content
 
-nvectorContentSerialLengthOffset :: Int
+nvectorContentSerialLengthOffset :: Num a => a
 nvectorContentSerialLengthOffset = #offset struct _N_VectorContent_Serial, length
 
-nvectorContentSerialDataOffset :: Int
+nvectorContentSerialDataOffset :: Num a => a
 nvectorContentSerialDataOffset = #offset struct _N_VectorContent_Serial, data
 
-sunmatrixContentOffset :: Int
+sunmatrixContentOffset :: Num a => a
 sunmatrixContentOffset = #offset struct _generic_SUNMatrix, content
 
-sunmatrixContentDenseDataOffset :: Int
+sunmatrixContentDenseDataOffset :: Num a => a
 sunmatrixContentDenseDataOffset = #offset struct _SUNMatrixContent_Dense, data
 
 getContentMatrixPtr :: Storable a => Ptr b -> IO a
