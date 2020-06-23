@@ -19,11 +19,20 @@ module Numeric.Sundials.Foreign
   , SparseMatrix(..)
   , SunVector(..)
     -- * Offsets
+    -- ** NVector
   , nvectorContentOffset
+    -- ** NVector_SERIAL
   , nvectorContentSerialLengthOffset
   , nvectorContentSerialDataOffset
+    -- ** SUNMatrix
   , sunmatrixContentOffset
+    -- ** SUNMatrix_DENSE
   , sunmatrixContentDenseDataOffset
+    -- ** SUNMatrix_SPARSE
+  , sunmatrixContentSparseIndexvalsOffset
+  , sunmatrixContentSparseIndexptrsOffset
+  , sunmatrixContentSparseDataOffset
+  , sunmatrixContentSparseNnzOffset
     -- * Methods
   , hEUN_EULER_2_1_2
   , bOGACKI_SHAMPINE_4_2_3
@@ -229,6 +238,20 @@ sunmatrixContentOffset = #offset struct _generic_SUNMatrix, content
 
 sunmatrixContentDenseDataOffset :: Num a => a
 sunmatrixContentDenseDataOffset = #offset struct _SUNMatrixContent_Dense, data
+
+sunmatrixContentSparseIndexvalsOffset :: Num a => a
+sunmatrixContentSparseIndexvalsOffset = #offset struct _SUNMatrixContent_Sparse, indexvals
+
+sunmatrixContentSparseIndexptrsOffset :: Num a => a
+sunmatrixContentSparseIndexptrsOffset = #offset struct _SUNMatrixContent_Sparse, indexptrs
+
+sunmatrixContentSparseDataOffset :: Num a => a
+sunmatrixContentSparseDataOffset = #offset struct _SUNMatrixContent_Sparse, data
+
+sunmatrixContentSparseNnzOffset :: Num a => a
+sunmatrixContentSparseNnzOffset = #offset struct _SUNMatrixContent_Sparse, NNZ
+
+
 
 getContentMatrixPtr :: Storable a => Ptr b -> IO a
 getContentMatrixPtr ptr = (#peek struct _generic_SUNMatrix, content) ptr

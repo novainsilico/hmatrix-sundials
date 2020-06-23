@@ -22,12 +22,22 @@ module Numeric.Sundials.Types
   , SunMatrix(..)
   , SunIndexType
   , SunRealType
+  , sunCtx
+    -- * Offsets
+    -- ** NVector
   , nvectorContentOffset
+    -- ** NVector_SERIAL
   , nvectorContentSerialLengthOffset
   , nvectorContentSerialDataOffset
+    -- ** SUNMatrix
   , sunmatrixContentOffset
+    -- ** SUNMatrix_DENSE
   , sunmatrixContentDenseDataOffset
-  , sunCtx
+    -- ** SUNMatrix_SPARSE
+  , sunmatrixContentSparseIndexvalsOffset
+  , sunmatrixContentSparseIndexptrsOffset
+  , sunmatrixContentSparseDataOffset
+  , sunmatrixContentSparseNnzOffset
   )
   where
 
