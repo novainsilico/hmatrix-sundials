@@ -39,7 +39,8 @@ emptyOdeProblem = OdeProblem
       { odeRhs = error "emptyOdeProblem: no odeRhs provided"
       , odeJacobian = Nothing
       , odeInitCond = error "emptyOdeProblem: no odeInitCond provided"
-      , odeEvents = mempty
+      , odeEventDirections = V.empty
+      , odeEventConditions = EventConditionsHaskell V.empty
       , odeTimeBasedEvents = TimeEventSpec $ return $ 1.0 / 0.0
       , odeEventHandler = nilEventHandler
       , odeMaxEvents = 100
@@ -325,13 +326,10 @@ eventTests opts = testGroup "Events"
       let upd _ _ = vector [1.0, 0.0, 0.0]
       runKatipT ?log_env $ solve opts
         (snd robertson)
-          { odeEvents =
-            [ EventSpec { eventCondition = \_t y -> y ! 0 - 0.0001
-                        , eventDirection = AnyDirection
-                        }
-            , EventSpec { eventCondition = \_t y -> y ! 2 - 0.01
-                        , eventDirection = AnyDirection
-                        }
+          { odeEventDirections = V.replicate 2 AnyDirection
+          , odeEventConditions = EventConditionsHaskell
+            [ \_t y -> y ! 0 - 0.0001
+            , \_t y -> y ! 2 - 0.01
             ]
           , odeMaxEvents = 100
           , odeSolTimes = [0,100]
@@ -371,7 +369,11 @@ cascadingEventsTest opts = odeGoldenTest True opts "Cascading_events" $ do
     prob = emptyOdeProblem
       { odeRhs = odeRhsPure $ \_ _ -> [1, 0]
       , odeInitCond = [0, 0]
-      , odeEvents = events
+      , odeEventDirections = V.replicate 2 AnyDirection
+      , odeEventConditions = EventConditionsHaskell
+        [ \_t y -> y ! 0 - 5
+        , \_t y -> y ! 0 - 6
+        ]
       , odeEventHandler = mkEventHandler
           [\_ y -> [7, y ! 1]
           ,\_ y -> [y ! 0, 1]
@@ -381,14 +383,6 @@ cascadingEventsTest opts = odeGoldenTest True opts "Cascading_events" $ do
       , odeMaxEvents = 100
       , odeSolTimes = [0,10]
       }
-    events =
-      [ EventSpec { eventCondition = \_t y -> y ! 0 - 5
-                  , eventDirection = AnyDirection
-                  }
-      , EventSpec { eventCondition = \_t y -> y ! 0 - 6
-                  , eventDirection = AnyDirection
-                  }
-      ]
 
 simultaneousEventsTest opts = testGroup "Simultaneous events"
   [ odeGoldenTest True opts (printf "Simultaneous_events/maxEvents=%d_eventRecord=%s_stopSolver=%s"
@@ -399,7 +393,9 @@ simultaneousEventsTest opts = testGroup "Simultaneous events"
             { odeRhs = odeRhsPure $ \_ _ -> [0,0]
             , odeJacobian = Nothing
             , odeInitCond = [0,0]
-            , odeEvents = events
+            , odeEventDirections = V.replicate 2 AnyDirection
+            , odeEventConditions = EventConditionsHaskell $
+                V.replicate 2 $ \t _ -> t - 5
             , odeEventHandler = mkEventHandler
                 (V.map (\i _ y -> y VS.// [(i,1)]) [0..1])
                 (V.fromList stopSolver)
@@ -408,12 +404,6 @@ simultaneousEventsTest opts = testGroup "Simultaneous events"
             , odeSolTimes = [0,10]
             , odeTolerances = defaultTolerances
             }
-          event =
-            EventSpec
-              { eventCondition = \t _ -> t - 5
-              , eventDirection = AnyDirection
-              }
-          events = V.replicate 2 event
       runKatipT ?log_env $ solve opts prob
   | maxEvents <- [0..3]
   , record <- replicateM 2 [False,True]
@@ -441,12 +431,8 @@ timeBasedEventTest opts = odeGoldenTest True opts "Time-based events" $ do
   let prob = emptyOdeProblem
         { odeRhs = odeRhsPure $ \_ _ -> [1, 0]
         , odeInitCond = [0, 0]
-        , odeEvents =
-            [ EventSpec
-              { eventCondition = \t y -> t/2 + y ! 0 - 4.5
-              , eventDirection = Upwards
-              }
-            ]
+        , odeEventDirections = [Upwards]
+        , odeEventConditions = EventConditionsHaskell [\t y -> t/2 + y ! 0 - 4.5]
         , odeTimeBasedEvents = time_ev_spec
         , odeEventHandler = combineEventHandlers
             (mkEventHandler [upd 13] [False] [True])
@@ -515,7 +501,6 @@ brusselator = (,) "brusselator" $ emptyOdeProblem
       , u * u                     , (-(u * u))     , 0.0
       , (-u)                      , u              , (-1.0) / eps - u
       ]
-  , odeEvents = mempty
   , odeEventHandler = nilEventHandler
   , odeMaxEvents = 0
   , odeInitCond = [1.2, 3.1, 3.0]
@@ -532,18 +517,13 @@ exponential = emptyOdeProblem
   { odeRhs = odeRhsPure $ \_ y -> [y VS.! 0]
   , odeJacobian = Nothing
   , odeInitCond = vector [1]
-  , odeEvents = events
+  , odeEventDirections = [Upwards]
+  , odeEventConditions = EventConditionsHaskell [\_ y -> y ! 0 - 1.1]
   , odeEventHandler = mkEventHandler [\_ _ -> [ 2 ]] [False] [True]
   , odeMaxEvents = 100
   , odeSolTimes = vector [ fromIntegral k / 100 | k <- [0..(22::Int)]]
   , odeTolerances = defaultTolerances
   }
-  where
-    events =
-      [ EventSpec { eventCondition = \_ y -> y ! 0 - 1.1
-                  , eventDirection = Upwards
-                  }
-      ]
 
 robertson = (,) "Robertson" $ emptyOdeProblem
   { odeRhs = odeRhsPure $ \_ (VS.toList -> [y1,y2,y3]) ->
@@ -557,7 +537,6 @@ robertson = (,) "Robertson" $ emptyOdeProblem
       , 0, 3.0e7*2*y2, 0
       ]
   , odeInitCond = [1.0, 0.0, 0.0]
-  , odeEvents = []
   , odeEventHandler = nilEventHandler
   , odeMaxEvents = 0
   , odeSolTimes = [0,20,100,1000]
@@ -568,7 +547,6 @@ empty = (,) "Empty system" $ emptyOdeProblem
   { odeRhs = odeRhsPure $ \_ _ -> []
   , odeJacobian = Nothing
   , odeInitCond = []
-  , odeEvents = []
   , odeEventHandler = nilEventHandler
   , odeMaxEvents = 0
   , odeSolTimes = [0,1]
@@ -579,7 +557,6 @@ stiffish = emptyOdeProblem
   { odeRhs = odeRhsPure $ \t ((VS.! 0) -> u) -> [ lamda * u + 1.0 / (1.0 + t * t) - lamda * atan t ]
   , odeJacobian = Nothing
   , odeInitCond = [0.0]
-  , odeEvents = []
   , odeEventHandler = nilEventHandler
   , odeMaxEvents = 0
   , odeSolTimes = [0.0, 0.1 .. 10.0]
@@ -602,7 +579,11 @@ simpleSine = emptyOdeProblem
 -- A sine wave that only changes direction once it reaches ±0.9.
 -- Illustrates event-specific reset function
 boundedSine = simpleSine
-  { odeEvents = events
+  { odeEventDirections = [Upwards, Downwards]
+  , odeEventConditions = EventConditionsHaskell
+    [ \_t y -> y ! 0 - 0.9
+    , \_t y -> y ! 0 + 0.9
+    ]
   , odeEventHandler = mkEventHandler
       [\_ y -> vector [ y ! 0, - abs (y ! 1) ]
       ,\_ y -> vector [ y ! 0, abs (y ! 1) ]
@@ -612,15 +593,6 @@ boundedSine = simpleSine
   , odeMaxEvents = 100
   , odeSolTimes = VS.fromList [ 2 * pi * k / 360 | k <- [0..360]]
   }
-  where
-    events =
-      [ EventSpec { eventCondition = \_t y -> y ! 0 - 0.9
-                  , eventDirection = Upwards
-                  }
-      , EventSpec { eventCondition = \_t y -> y ! 0 + 0.9
-                  , eventDirection = Downwards
-                  }
-      ]
 
 -- | An example of a system with a discontinuous RHS
 discontinuousRHS = emptyOdeProblem
@@ -630,7 +602,11 @@ discontinuousRHS = emptyOdeProblem
         else [0]
   , odeJacobian = Nothing
   , odeInitCond = [0]
-  , odeEvents = events
+  , odeEventDirections = V.replicate 2 Upwards
+  , odeEventConditions = EventConditionsHaskell
+    [ \t _ -> t - t1
+    , \t _ -> t - t2
+    ]
   , odeEventHandler = mkEventHandler
       (V.replicate 2 (\_ y -> y))
       (V.replicate 2 False)
@@ -644,22 +620,20 @@ discontinuousRHS = emptyOdeProblem
     t1 = 0.01
     t2 = 0.02
     deriv = 100
-    events =
-      [ EventSpec
-        { eventCondition = \t _ -> t - t1
-        , eventDirection = Upwards
-        }
-      , EventSpec
-        { eventCondition = \t _ -> t - t2
-        , eventDirection = Upwards
-        }
-      ]
 
 modulusEvent record_event = emptyOdeProblem
   { odeRhs = odeRhsPure $ \t _ -> [t `fmod` 1]
   , odeJacobian = Nothing
   , odeInitCond = [0]
-  , odeEvents = events
+  , odeEventDirections = [AnyDirection]
+  , odeEventConditions = EventConditionsHaskell
+    [ \t _ ->
+          let
+            a = t
+            b = 1
+          in
+            abs((a-b/2) `fmod` (2*b) - b) - b/2
+    ]
   , odeEventHandler = mkEventHandler
       [\_ y -> y]
       [False]
@@ -668,15 +642,3 @@ modulusEvent record_event = emptyOdeProblem
   , odeSolTimes = [0,10]
   , odeTolerances = defaultTolerances
   }
-  where
-    events =
-      [ EventSpec
-        { eventCondition = \t _ ->
-            let
-              a = t
-              b = 1
-            in
-              abs((a-b/2) `fmod` (2*b) - b) - b/2
-        , eventDirection = AnyDirection
-        }
-      ]

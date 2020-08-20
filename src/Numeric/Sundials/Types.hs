@@ -16,7 +16,8 @@ module Numeric.Sundials.Types
   , ErrorDiagnostics(..)
   , SundialsSolution(..)
   , CrossingDirection(..)
-  , EventSpec(..)
+  , EventConditionCType
+  , EventConditions(..)
   , TimeEventSpec(..)
   , SunVector(..)
   , SunMatrix(..)
@@ -75,9 +76,12 @@ type EventHandler
   -> IO EventHandlerResult
 
 data OdeProblem = OdeProblem
-  { odeEvents :: V.Vector EventSpec
-    -- ^ The events that may occur, including the condition when they occur
-    -- and how to update the state of the system when they do.
+  { odeEventConditions :: EventConditions
+    -- ^ The event conditions
+  , odeEventDirections :: V.Vector CrossingDirection
+    -- ^ The requested directions of 0 crossing for each event. Also, the
+    -- length of this vector tells us the number of events (even when
+    -- 'odeEventConditions' is represented by a single C function).
   , odeMaxEvents :: !Int
     -- ^ The maximal number of events that may occur. This is needed to
     -- allocate enough space to store the events. If more events occur, an
@@ -147,6 +151,17 @@ data JacobianRepr
   = SparseJacobian !SparsePattern -- ^ sparse Jacobian with the given sparse pattern
   | DenseJacobian
   deriving (Show)
+
+type EventConditionCType
+  =  SunRealType     -- ^ @realtype t@
+  -> Ptr SunVector   -- ^ @N_Vector y@
+  -> Ptr SunRealType -- ^ @realtype *gout@
+  -> Ptr UserData    -- ^ @void *user_data@
+  -> IO CInt
+
+data EventConditions
+  = EventConditionsHaskell (V.Vector (Double -> VS.Vector Double -> Double))
+  | EventConditionsC (FunPtr EventConditionCType)
 
 data ODEOpts method = ODEOpts {
     maxNumSteps :: Int32
@@ -272,11 +287,6 @@ data CrossingDirection = Upwards | Downwards | AnyDirection
 --
 -- If there is no next time-based event, the action should return +Inf.
 newtype TimeEventSpec = TimeEventSpec (IO Double)
-
-data EventSpec = EventSpec
-  { eventCondition  :: Double -> VS.Vector Double -> Double
-  , eventDirection  :: !CrossingDirection
-  }
 
 sunTypesTable :: Map.Map TypeSpecifier TH.TypeQ
 sunTypesTable = Map.fromList

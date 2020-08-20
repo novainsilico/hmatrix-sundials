@@ -67,7 +67,7 @@ allocateCVars :: OdeProblem -> IO (CVars (VS.MVector RealWorld))
 allocateCVars OdeProblem{..} = do
   let dim = VS.length odeInitCond
   c_diagnostics <- VSM.new 11
-  c_root_info <- VSM.new $ V.length odeEvents
+  c_root_info <- VSM.new $ V.length odeEventDirections
   c_event_index <- VSM.new odeMaxEvents
   c_event_time <- VSM.new odeMaxEvents
   c_actual_event_direction <- VSM.new odeMaxEvents
@@ -110,7 +110,7 @@ data CConsts = CConsts
   , c_rtol :: CDouble
   , c_atol :: VS.Vector CDouble
   , c_n_event_specs :: CInt
-  , c_event_fn :: CDouble -> Ptr T.SunVector -> Ptr CDouble -> Ptr () -> IO CInt
+  , c_event_fn :: FunPtr EventConditionCType
   , c_apply_event
       :: CInt -- number of triggered events
       -> Ptr CInt -- event indices
@@ -169,14 +169,8 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
     c_max_err_test_fails = fromIntegral maxFail
     c_init_step_size_set = fromIntegral . fromEnum $ isJust initStep
     c_init_step_size = coerce . fromMaybe 0 $ initStep
-    c_n_event_specs = fromIntegral $ V.length odeEvents
-    c_requested_event_direction = V.convert $ V.map (directionToInt . eventDirection) odeEvents
-    c_event_fn t y_ptr out_ptr _ptr = do
-      y <- sunVecVals <$> peek y_ptr
-      let vals = V.convert $ V.map (\ev -> coerce (eventCondition ev) t y) odeEvents
-      -- FIXME: We should be able to use poke somehow
-      T.vectorToC vals (fromIntegral c_n_event_specs) out_ptr
-      return 0
+    c_n_event_specs = fromIntegral $ V.length odeEventDirections
+    c_requested_event_direction = V.convert $ V.map directionToInt odeEventDirections
     c_apply_event n_events event_indices_ptr t y_ptr y'_ptr stop_solver_ptr record_event_ptr = do
       event_indices <- vecFromPtr event_indices_ptr (fromIntegral n_events)
       -- Apparently there's no safe version of 
@@ -220,24 +214,40 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
         funptr <- ContT $ bracket (mkOdeRhsC funIO) freeHaskellFunPtr
         return (funptr, nullPtr)
   c_jac <-
-      case odeJacobian of
-        Nothing   -> return nullFunPtr
-        Just (OdeJacobianC fptr) -> return fptr
-        Just (OdeJacobianHaskell jac_fn) -> do
-        let
-          funIO :: OdeJacobianCType
-          funIO t y_ptr _fy_ptr jac_ptr _userdata _tmp1 _tmp2 _tmp3 = do
-            y <- peek y_ptr
-            let jac = matrixToSunMatrix $
-                  jac_fn
-                    (coerce t :: Double)
-                    (coerce $ sunVecVals y :: VS.Vector Double)
-            case jacobianRepr of
-              DenseJacobian -> poke jac_ptr jac
-              SparseJacobian spat -> poke (castPtr jac_ptr) (T.SparseMatrix spat jac)
-            return 0
-        funptr <- ContT $ bracket (mkOdeJacobianC funIO) freeHaskellFunPtr
-        return funptr
+    case odeJacobian of
+      Nothing   -> return nullFunPtr
+      Just (OdeJacobianC fptr) -> return fptr
+      Just (OdeJacobianHaskell jac_fn) -> do
+      let
+        funIO :: OdeJacobianCType
+        funIO t y_ptr _fy_ptr jac_ptr _userdata _tmp1 _tmp2 _tmp3 = do
+          y <- peek y_ptr
+          let jac = matrixToSunMatrix $
+                jac_fn
+                  (coerce t :: Double)
+                  (coerce $ sunVecVals y :: VS.Vector Double)
+          case jacobianRepr of
+            DenseJacobian -> poke jac_ptr jac
+            SparseJacobian spat -> poke (castPtr jac_ptr) (T.SparseMatrix spat jac)
+          return 0
+      funptr <- ContT $ bracket (mkOdeJacobianC funIO) freeHaskellFunPtr
+      return funptr
+  c_event_fn <-
+    case odeEventConditions of
+      EventConditionsC fptr -> return fptr
+      EventConditionsHaskell conds -> do
+      when (V.length conds /= V.length odeEventDirections) $
+        liftIO . throwIO $ ErrorCall "odeEventConditions and odeEventDirections have different lengths"
+      let
+        funIO :: EventConditionCType
+        funIO t y_ptr out_ptr _ptr = do
+              y <- sunVecVals <$> peek y_ptr
+              let vals = V.convert $ V.map (\cond -> coerce cond t y) conds
+              -- FIXME: We should be able to use poke somehow
+              T.vectorToC vals (fromIntegral c_n_event_specs) out_ptr
+              return 0
+      funptr <- ContT $ bracket (mkEventConditionsC funIO) freeHaskellFunPtr
+      return funptr
   return CConsts{..}
 
 matrixToSunMatrix :: Matrix Double -> T.SunMatrix
@@ -271,6 +281,9 @@ foreign import ccall "wrapper"
 
 foreign import ccall "wrapper"
   mkOdeJacobianC :: OdeJacobianCType -> IO (FunPtr OdeJacobianCType)
+
+foreign import ccall "wrapper"
+  mkEventConditionsC :: EventConditionCType -> IO (FunPtr EventConditionCType)
 
 assembleSolverResult
   :: OdeProblem

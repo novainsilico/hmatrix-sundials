@@ -196,7 +196,7 @@ solveC CConsts{..} CVars{..} report_error =
   if (check_flag(&flag, "ARKStepSVtolerances", 1, report_error)) return(6212);
 
   /* Specify the root function */
-  flag = ARKStepRootInit(arkode_mem, $(int c_n_event_specs), $fun:(int (* c_event_fn) (double t, N_Vector y, double *gout, void * params)));
+  flag = ARKStepRootInit(arkode_mem, $(int c_n_event_specs), $(int (* c_event_fn) (realtype, N_Vector, realtype*, UserData*)));
   if (check_flag(&flag, "ARKStepRootInit", 1, report_error)) return(6290);
 
   if (implicit) {

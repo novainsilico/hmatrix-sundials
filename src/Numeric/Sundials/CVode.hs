@@ -143,7 +143,7 @@ solveC CConsts{..} CVars{..} report_error =
   if (check_flag(&flag, "CVodeSVtolerances", 1, report_error)) return(6212);
 
   /* Specify the root function */
-  flag = CVodeRootInit(cvode_mem, $(int c_n_event_specs), $fun:(int (* c_event_fn) (double t, N_Vector y, double gout[], void * params)));
+  flag = CVodeRootInit(cvode_mem, $(int c_n_event_specs), $(int (* c_event_fn) (realtype, N_Vector, realtype*, UserData*)));
   if (check_flag(&flag, "CVodeRootInit", 1, report_error)) return(6290);
 
   /* Initialize a jacobian matrix and solver */
