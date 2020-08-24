@@ -132,7 +132,8 @@ solveC CConsts{..} CVars{..} report_error =
   /* t_start tracks the starting point of the integration in order to detect
      empty integration interval and avoid a potential infinite loop;
      see Note [CV_TOO_CLOSE]. Unlike T0, t_start is updated every time we
-     restart the solving after handling (or not) an event.
+     restart the solving after handling (or not) an event, or emitting
+     a requested time point.
      Why not just look for the last recorded time in c_output_mat? Because
      an event may have eventRecord = False and not be present there.
   */
@@ -376,7 +377,6 @@ solveC CConsts{..} CVars{..} report_error =
         goto finish;
       }
 
-      t_start = t;
       if (n_events_triggered > 0 || time_based_event) {
         /* Reinitialize */
         if (!implicit) {
@@ -391,6 +391,7 @@ solveC CConsts{..} CVars{..} report_error =
       if (++input_ind >= $(int c_n_sol_times))
         goto finish;
     }
+    t_start = t;
   }
 
   finish:
