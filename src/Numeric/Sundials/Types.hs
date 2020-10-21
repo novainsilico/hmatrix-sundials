@@ -18,6 +18,7 @@ module Numeric.Sundials.Types
   , CrossingDirection(..)
   , EventConditionCType
   , EventConditions(..)
+  , eventConditionsPure
   , TimeEventSpec(..)
   , SunVector(..)
   , SunMatrix(..)
@@ -160,8 +161,14 @@ type EventConditionCType
   -> IO CInt
 
 data EventConditions
-  = EventConditionsHaskell (V.Vector (Double -> VS.Vector Double -> Double))
+  = EventConditionsHaskell (Double -> VS.Vector Double -> VS.Vector Double)
   | EventConditionsC (FunPtr EventConditionCType)
+
+-- | A way to construct 'EventConditionsHaskell' when there is no shared
+-- computation among different functions
+eventConditionsPure :: V.Vector (Double -> VS.Vector Double -> Double) -> EventConditions
+eventConditionsPure conds = EventConditionsHaskell $ \t y ->
+  V.convert $ V.map (\cond -> cond t y) conds
 
 data ODEOpts method = ODEOpts {
     maxNumSteps :: Int32

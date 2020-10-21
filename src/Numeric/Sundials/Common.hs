@@ -235,16 +235,13 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
   c_event_fn <-
     case odeEventConditions of
       EventConditionsC fptr -> return fptr
-      EventConditionsHaskell conds -> do
-      when (V.length conds /= V.length odeEventDirections) $
-        liftIO . throwIO $ ErrorCall "odeEventConditions and odeEventDirections have different lengths"
+      EventConditionsHaskell f -> do
       let
         funIO :: EventConditionCType
         funIO t y_ptr out_ptr _ptr = do
               y <- sunVecVals <$> peek y_ptr
-              let vals = V.convert $ V.map (\cond -> coerce cond t y) conds
               -- FIXME: We should be able to use poke somehow
-              T.vectorToC vals (fromIntegral c_n_event_specs) out_ptr
+              T.vectorToC (coerce f t y) (fromIntegral c_n_event_specs) out_ptr
               return 0
       funptr <- ContT $ bracket (mkEventConditionsC funIO) freeHaskellFunPtr
       return funptr
