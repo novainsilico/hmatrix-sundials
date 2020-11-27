@@ -421,7 +421,7 @@ logWithKatip = do
       severity =
         if err_code <= 0
           then ErrorS
-          else WarningS
+          else InfoS
       errCtx :: SundialsErrorContext
       errCtx = SundialsErrorContext
         { sundialsErrorCode = fromIntegral err_code
