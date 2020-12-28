@@ -10,3 +10,19 @@ int check_flag(void *flagvalue, const char *funcname, int opt, ARKErrHandlerFn r
 
 /* Give void a name so that we can map it to the Haskell type UserData */
 typedef void UserData;
+
+/* The use of this macro requires that a function
+
+   void debug(char*)
+
+   is in scope */
+#ifdef ENABLE_DEBUG
+#define DEBUG(...) do { \
+  char *formatted_str; \
+  if (asprintf(&formatted_str, __VA_ARGS__)) { \
+    debug(formatted_str); \
+    free(formatted_str); \
+  } } while (0)
+#else
+#define DEBUG(...) do {} while (0)
+#endif
