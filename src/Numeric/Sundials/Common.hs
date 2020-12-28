@@ -333,7 +333,7 @@ assembleSolverResult OdeProblem{..} ret CVars{..} = do
 -- | The common solving logic between ARKode and CVode
 solveCommon
   :: (Method method, Katip m)
-  => (CConsts -> CVars (VS.MVector RealWorld) -> ReportErrorFn -> IO CInt)
+  => (CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CInt)
       -- ^ the CVode/ARKode solving function; mostly inline-C code
   -> ODEOpts method
   -> OdeProblem
@@ -350,11 +350,11 @@ solveCommon solve_c opts problem@(OdeProblem{..})
 
   | otherwise = do
 
-    report_error <- logWithKatip
+    log_env <- getLogEnv
     liftIO $ do -- the rest is in the IO monad
     vars <- allocateCVars problem
     ret <- withCConsts opts problem $ \consts ->
-      solve_c consts vars report_error
+      solve_c consts vars log_env
     frozenVars <- freezeCVars vars
     assembleSolverResult problem ret frozenVars
 
@@ -398,32 +398,34 @@ type ReportErrorFn =
   -> IO ()
   )
 
-logWithKatip
-  :: Katip m
-  => m ReportErrorFn
-logWithKatip = do
-  log_env <- getLogEnv
-  return $
-    \err_code c_mod_name c_func_name c_msg _userdata ->
-    -- See Note [CV_TOO_CLOSE]
-    if err_code == T.cV_TOO_CLOSE then pure () else do
-    let
-      toText :: CString -> IO T.Text
-      toText = fmap T.decodeUtf8 . BS.packCString
-    mod_name <- toText c_mod_name
-    func_name <- toText c_func_name
-    msg <- toText c_msg
-    let
-      severity :: Severity
-      severity =
-        if err_code <= 0
-          then ErrorS
-          else InfoS
-      errCtx :: SundialsErrorContext
-      errCtx = SundialsErrorContext
-        { sundialsErrorCode = fromIntegral err_code
-        , sundialsErrorModule = mod_name
-        , sundialsErrorFunction = func_name
-        }
-    flip runReaderT log_env . unKatipT $ do
-      logF errCtx "sundials" severity (logStr msg)
+cstringToText :: CString -> IO T.Text
+cstringToText = fmap T.decodeUtf8 . BS.packCString
+
+reportErrorWithKatip :: LogEnv -> ReportErrorFn
+reportErrorWithKatip log_env err_code c_mod_name c_func_name c_msg _userdata = do
+  -- See Note [CV_TOO_CLOSE]
+  if err_code == T.cV_TOO_CLOSE then pure () else do
+  let
+  mod_name <- cstringToText c_mod_name
+  func_name <- cstringToText c_func_name
+  msg <- cstringToText c_msg
+  let
+    severity :: Severity
+    severity =
+      if err_code <= 0
+        then ErrorS
+        else InfoS
+    errCtx :: SundialsErrorContext
+    errCtx = SundialsErrorContext
+      { sundialsErrorCode = fromIntegral err_code
+      , sundialsErrorModule = mod_name
+      , sundialsErrorFunction = func_name
+      }
+  flip runReaderT log_env . unKatipT $ do
+    logF errCtx "sundials" severity (logStr msg)
+
+debugMsgWithKatip :: LogEnv -> CString -> IO ()
+debugMsgWithKatip log_env cstr = do
+  text <- cstringToText cstr
+  flip runReaderT log_env . unKatipT $ do
+    logF () "hmatrix-sundials" DebugS (logStr text)

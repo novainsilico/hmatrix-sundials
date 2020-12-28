@@ -10,6 +10,7 @@ import qualified Language.C.Inline as C
 import qualified Data.Vector.Storable as VS
 import Foreign.C.Types
 import GHC.Prim
+import Katip
 
 import Numeric.Sundials.Foreign
 import Numeric.Sundials.Types
@@ -91,8 +92,11 @@ instance Method ARKMethod where
       then Explicit
       else Implicit
 
-solveC :: CConsts -> CVars (VS.MVector RealWorld) -> ReportErrorFn -> IO CInt
-solveC CConsts{..} CVars{..} report_error =
+solveC :: CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CInt
+solveC CConsts{..} CVars{..} log_env =
+  let
+    report_error = reportErrorWithKatip log_env
+  in
   [C.block| int {
   /* general problem variables */
 

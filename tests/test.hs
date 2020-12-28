@@ -236,7 +236,7 @@ nilEventHandler _ _ _ = throwIO $ ErrorCall "nilEventHandler"
 ----------------------------------------------------------------------
 
 main = do
-  handleScribe <- mkHandleScribe ColorIfTerminal stderr (permitItem InfoS) V2
+  handleScribe <- mkHandleScribe ColorIfTerminal stderr (permitItem DebugS) V2
   log_env <- registerScribe "stderr" handleScribe defaultScribeSettings =<<
     initLogEnv "test" "devel"
   let ?log_env = log_env

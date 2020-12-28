@@ -10,6 +10,7 @@ import qualified Language.C.Inline as C
 import qualified Data.Vector.Storable as VS
 import Foreign.C.Types
 import GHC.Prim
+import Katip
 
 import Numeric.Sundials.Foreign
 import Numeric.Sundials.Types
@@ -43,8 +44,12 @@ instance Method CVMethod where
   methodSolver = CVode
   methodType _ = Implicit
 
-solveC :: CConsts -> CVars (VS.MVector RealWorld) -> ReportErrorFn -> IO CInt
-solveC CConsts{..} CVars{..} report_error =
+solveC :: CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CInt
+solveC CConsts{..} CVars{..} log_env =
+  let
+    report_error = reportErrorWithKatip log_env
+    debug = debugMsgWithKatip log_env
+  in
   [C.block| int {
   /* general problem variables */
 
@@ -94,6 +99,7 @@ solveC CConsts{..} CVars{..} report_error =
   /* Initialize data structures */
 
   ARKErrHandlerFn report_error = $fun:(void (*report_error)(int,const char*, const char*, char*, void*));
+  void (*debug)(char*) = $fun:(void (*debug)(char*));
 
   if ($(double c_fixedstep) > 0.0) {
     report_error(0, "hmatrix-sundials", "solveC", "fixedStep cannot be used with CVode", NULL);
@@ -197,13 +203,16 @@ solveC CConsts{..} CVars{..} report_error =
       goto finish;
     }
     double next_stop_time = fmin(ti, next_time_event);
+    DEBUG("Main loop iteration: t = %.17g (%a), next time point (ti) = %.17g, next time event = %.17g", t, ti, next_time_event);
     flag = CVode(cvode_mem, next_stop_time, y, &t, CV_NORMAL); /* call integrator */
+    DEBUG("CVode returned %d; now t = %.17g\n", flag, t);
     int root_based_event = flag == CV_ROOT_RETURN;
     int time_based_event = t == next_time_event;
     if (flag == CV_TOO_CLOSE && !time_based_event) {
       /* See Note [CV_TOO_CLOSE]
          No solving was required; just set the time t manually and continue
          as if solving succeeded. */
+      DEBUG("Got CV_TOO_CLOSE; no solving was required; proceeding to t = %.17g", next_stop_time);
       t = next_stop_time;
     }
     else
@@ -213,6 +222,7 @@ solveC CConsts{..} CVars{..} report_error =
          get CV_TOO_CLOSE.
          Pretend that the root didn't happen, lest we keep handling it
          forever. */
+      DEBUG("Got a root but t == t_start == next_stop_time; pretending it didn't happen");
       flag = CV_SUCCESS;
     }
     else
@@ -247,11 +257,13 @@ solveC CConsts{..} CVars{..} report_error =
     ($vec-ptr:(int *c_n_rows))[0] = output_ind;
 
     if (root_based_event || time_based_event) {
+      DEBUG("Got an event");
       if (event_ind >= $(int c_max_events)) {
         /* We reached the maximum number of events.
            Either the maximum number of events is set to 0,
            or there's a bug in our code below. In any case return an error.
         */
+        DEBUG("Maximum number of events reached");
         return 8630;
       }
 
@@ -259,6 +271,7 @@ solveC CConsts{..} CVars{..} report_error =
       int n_events_triggered = 0;
       int *c_root_info = ($vec-ptr:(int *c_root_info));
       if (root_based_event) {
+        DEBUG("Handling root-based events");
         flag = CVodeGetRootInfo(cvode_mem, c_root_info);
         if (check_flag(&flag, "CVodeGetRootInfo", 1, report_error)) return 2829;
         for (i = 0; i < $(int c_n_event_specs); i++) {
@@ -279,10 +292,12 @@ solveC CConsts{..} CVars{..} report_error =
       int record_events = 0;
       if (n_events_triggered > 0 || time_based_event) {
         /* Update the state with the supplied function */
+        DEBUG("Calling the event handler; n_events_triggered = %d; time_based_event = %d", n_events_triggered, time_based_event);
         $fun:(int (* c_apply_event) (int, int*, double, N_Vector y, N_Vector z, int*, int*))(n_events_triggered, c_root_info, t, y, y, &stop_solver, &record_events);
       }
 
       if (record_events) {
+        DEBUG("Recording events");
         /* A corner case: if the time-based event triggers at the very beginning,
            then we don't want to duplicate the initial row, so rewind it back.
            Note that we do this only in the branch where record_events is true;
@@ -307,14 +322,17 @@ solveC CConsts{..} CVars{..} report_error =
         }
       }
       if (event_ind >= $(int c_max_events)) {
+        DEBUG("Reached max_events; returning");
         ($vec-ptr:(sunindextype *c_diagnostics))[10] = 1;
         stop_solver = 1;
       }
       if (stop_solver) {
+        DEBUG("Stopping the hmatrix-sundials solver as requested");
         goto finish;
       }
 
       if (n_events_triggered > 0 || time_based_event) {
+        DEBUG("Re-initializing the system");
         flag = CVodeReInit(cvode_mem, t, y);
         if (check_flag(&flag, "CVodeReInit", 1, report_error)) return(1576);
       }
@@ -327,6 +345,7 @@ solveC CConsts{..} CVars{..} report_error =
   }
 
   finish:
+  DEBUG("Cleaning up before returning from the hmatrix-sundials solver");
 
   /* The number of actual roots we found */
   ($vec-ptr:(int *c_n_events))[0] = event_ind;

@@ -12,6 +12,9 @@ build-type:          Simple
 extra-source-files:  ChangeLog.md, README.md
 cabal-version:       >=1.18
 
+flag debug
+  description: Perform debug logging
+  default: False
 
 library
   build-depends:       base >=4.10,
@@ -61,6 +64,9 @@ library
                        DeriveAnyClass
                        OverloadedStrings
   ghc-options:         -Wall
+  if flag(debug)
+    -- _GNU_SOURCE is needed for asprintf
+    cpp-options: -DENABLE_DEBUG -D_GNU_SOURCE
 
 test-suite test
   type:                exitcode-stdio-1.0
