@@ -202,6 +202,9 @@ solveC CConsts{..} CVars{..} log_env =
   /* Specify the root function */
   flag = ARKStepRootInit(arkode_mem, $(int c_n_event_specs), $(int (* c_event_fn) (realtype, N_Vector, realtype*, UserData*)));
   if (check_flag(&flag, "ARKStepRootInit", 1, report_error)) return(6290);
+  /* Disable the inactive roots warning; see https://git.novadiscovery.net/jinko/jinko/-/issues/2368 */
+  flag = ARKStepSetNoInactiveRootWarn(arkode_mem);
+  if (check_flag(&flag, "ARKStepSetNoInactiveRootWarn", 1, report_error)) return(6291);
 
   if (implicit) {
     /* Initialize a jacobian matrix and solver */
