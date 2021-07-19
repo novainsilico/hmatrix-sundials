@@ -60,7 +60,7 @@ data ARKMethod = SDIRK_2_1_2
                | FEHLBERG_13_7_8
   deriving Show
 
-instance Method ARKMethod where
+instance IsMethod ARKMethod where
   methodToInt SDIRK_2_1_2             = sDIRK_2_1_2
   methodToInt BILLINGTON_3_3_2        = bILLINGTON_3_3_2
   methodToInt TRBDF2_3_3_2            = tRBDF2_3_3_2

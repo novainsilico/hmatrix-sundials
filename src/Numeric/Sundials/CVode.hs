@@ -38,7 +38,7 @@ data CVMethod = ADAMS
               | BDF
   deriving (Eq, Ord, Show, Read)
 
-instance Method CVMethod where
+instance IsMethod CVMethod where
   methodToInt ADAMS = cV_ADAMS
   methodToInt BDF   = cV_BDF
   methodSolver = CVode

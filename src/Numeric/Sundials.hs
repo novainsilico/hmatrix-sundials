@@ -4,7 +4,7 @@ module Numeric.Sundials
     -- * Types
   , ARKMethod(..)
   , CVMethod(..)
-  , Method(..)
+  , IsMethod(..)
   , MethodType(..)
   , Solver(..)
   , module Numeric.Sundials.Types
@@ -19,7 +19,7 @@ import Katip
 -- | Solve an ODE system using either ARKode or CVode (depending on what
 -- @method@ is instantiated with).
 solve
-  :: forall m method . (Katip m, Method method)
+  :: forall m method . (Katip m, IsMethod method)
   => ODEOpts method -- ^ solver options
   -> OdeProblem -- ^ the ODE system to solve
   -> m (Either ErrorDiagnostics SundialsSolution)

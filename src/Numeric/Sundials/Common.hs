@@ -143,13 +143,13 @@ data Solver = CVode | ARKode
 data MethodType = Explicit | Implicit
   deriving (Show, Eq)
 
-class Method method where
+class IsMethod method where
   methodToInt :: method -> CInt
   methodSolver :: Solver
   methodType :: method -> MethodType
 
 withCConsts
-  :: Method method
+  :: IsMethod method
   => ODEOpts method
   -> OdeProblem
   -> (CConsts -> IO r)
@@ -332,7 +332,7 @@ assembleSolverResult OdeProblem{..} ret CVars{..} = do
 
 -- | The common solving logic between ARKode and CVode
 solveCommon
-  :: (Method method, Katip m)
+  :: (IsMethod method, Katip m)
   => (CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CInt)
       -- ^ the CVode/ARKode solving function; mostly inline-C code
   -> ODEOpts method

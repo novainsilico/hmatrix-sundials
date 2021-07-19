@@ -48,7 +48,7 @@ emptyOdeProblem = OdeProblem
       , odeTolerances = defaultTolerances
       }
 
-data OdeSolver = forall method . (Show method, Method method) => OdeSolver
+data OdeSolver = forall method . (Show method, IsMethod method) => OdeSolver
   String -- name
   [method]
 
@@ -136,7 +136,7 @@ compareSolutions same_method a b = asum @[]
     precision = if same_method then 1e-10 else 1e-1
 
 odeGoldenTest
-  :: forall method . (Method method, Show method)
+  :: forall method . (IsMethod method, Show method)
   => Bool -- ^ compare between methods? (via a canonical golden file)
   -> ODEOpts method -- ^ ode options (affect the golden file name)
   -> String -- ^ name (of both the test and the file)
