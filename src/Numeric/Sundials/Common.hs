@@ -4,19 +4,13 @@ module Numeric.Sundials.Common where
 
 import Foreign.C.Types
 import Foreign.Ptr
-import Foreign.Storable (peek, poke)
 import Foreign.C.String
 import Numeric.Sundials.Foreign as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Storable.Mutable as VSM
-import Data.Maybe
-import Data.Int
 import Numeric.LinearAlgebra.HMatrix as H hiding (Vector)
 import GHC.Prim
-import Control.Monad.IO.Class
-import Control.Monad.Cont
-import Control.Exception
 import Control.DeepSeq
 import Katip
 import Data.Aeson
@@ -142,115 +136,12 @@ data CConsts = CConsts
   , c_init_step_size :: CDouble
   }
 
-data Solver = CVode | ARKode
-  deriving Show
-
 data MethodType = Explicit | Implicit
   deriving (Show, Eq)
 
 class IsMethod method where
   methodToInt :: method -> CInt
-  methodSolver :: Solver
   methodType :: method -> MethodType
-
-withCConsts
-  :: IsMethod method
-  => ODEOpts method
-  -> OdeProblem
-  -> (CConsts -> IO r)
-  -> IO r
-withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
-  let
-    dim = VS.length c_init_cond
-    c_init_cond = coerce odeInitCond
-    c_dim = fromIntegral dim
-    c_n_sol_times = fromIntegral . VS.length $ odeSolTimes
-    c_sol_time = coerce odeSolTimes
-    c_rtol = relTolerance odeTolerances
-    c_atol = either (VS.replicate dim) id $ absTolerances odeTolerances
-    c_minstep = coerce minStep
-    c_fixedstep = coerce fixedStep
-    c_max_n_steps = fromIntegral maxNumSteps
-    c_max_err_test_fails = fromIntegral maxFail
-    c_init_step_size_set = fromIntegral . fromEnum $ isJust initStep
-    c_init_step_size = coerce . fromMaybe 0 $ initStep
-    c_n_event_specs = fromIntegral $ V.length odeEventDirections
-    c_requested_event_direction = V.convert $ V.map directionToInt odeEventDirections
-    c_apply_event n_events event_indices_ptr t y_ptr y'_ptr stop_solver_ptr record_event_ptr = do
-      event_indices <- vecFromPtr event_indices_ptr (fromIntegral n_events)
-      -- Apparently there's no safe version of 
-      y_vec <- peek y_ptr
-      EventHandlerResult{..} <-
-        odeEventHandler
-          (coerce t :: Double)
-          (coerce $ sunVecVals y_vec :: VS.Vector Double)
-          (VS.map fromIntegral event_indices :: VS.Vector Int)
-      poke y'_ptr $ SunVector
-        { sunVecN = sunVecN y_vec
-        , sunVecVals = coerce eventNewState
-        }
-      poke stop_solver_ptr . fromIntegral $ fromEnum eventStopSolver
-      poke record_event_ptr . fromIntegral $ fromEnum eventRecord
-      return 0
-    c_max_events = fromIntegral odeMaxEvents
-    c_next_time_event = coerce odeTimeBasedEvents
-    c_jac_set = fromIntegral . fromEnum $ isJust odeJacobian
-    c_sparse_jac = case jacobianRepr of
-      SparseJacobian (T.SparsePattern spat) ->
-        VS.sum (VS.map fromIntegral spat) +
-        -- additionally, add diagonal zeros, as they'll be allocated too
-        sum [ if spat VS.! (i + i * dim) == 0 then 1 else 0 | i <- [0 .. dim-1] ]
-      DenseJacobian -> 0
-    c_method = methodToInt odeMethod
-
-  (c_rhs, c_rhs_userdata) <-
-    case odeRhs of
-      OdeRhsC ptr u -> return (ptr, u)
-      OdeRhsHaskell fun -> do
-        let
-          funIO :: OdeRhsCType
-          funIO t y f _ptr = do
-            sv <- peek y
-            r <- fun t (sunVecVals sv)
-            poke f $ SunVector { sunVecN = sunVecN sv
-                               , sunVecVals = r
-                               }
-            return 0
-        funptr <- ContT $ bracket (mkOdeRhsC funIO) freeHaskellFunPtr
-        return (funptr, nullPtr)
-  c_jac <-
-    case odeJacobian of
-      Nothing   -> return nullFunPtr
-      Just (OdeJacobianC fptr) -> return fptr
-      Just (OdeJacobianHaskell jac_fn) -> do
-      let
-        funIO :: OdeJacobianCType
-        funIO t y_ptr _fy_ptr jac_ptr _userdata _tmp1 _tmp2 _tmp3 = do
-          y <- peek y_ptr
-          let jac = matrixToSunMatrix $
-                jac_fn
-                  (coerce t :: Double)
-                  (coerce $ sunVecVals y :: VS.Vector Double)
-          case jacobianRepr of
-            DenseJacobian -> poke jac_ptr jac
-            SparseJacobian spat -> poke (castPtr jac_ptr) (T.SparseMatrix spat jac)
-          return 0
-      funptr <- ContT $ bracket (mkOdeJacobianC funIO) freeHaskellFunPtr
-      return funptr
-  c_event_fn <-
-    case odeEventConditions of
-      EventConditionsC fptr -> return fptr
-      EventConditionsHaskell f -> do
-      let
-        funIO :: EventConditionCType
-        funIO t y_ptr out_ptr _ptr = do
-              y <- sunVecVals <$> peek y_ptr
-              -- FIXME: We should be able to use poke somehow
-              T.vectorToC (coerce f t y) (fromIntegral c_n_event_specs) out_ptr
-              return 0
-      funptr <- ContT $ bracket (mkEventConditionsC funIO) freeHaskellFunPtr
-      return funptr
-  return CConsts{..}
 
 matrixToSunMatrix :: Matrix Double -> T.SunMatrix
 matrixToSunMatrix m = T.SunMatrix { T.rows = nr, T.cols = nc, T.vals = vs }
@@ -334,34 +225,6 @@ assembleSolverResult OdeProblem{..} ret CVars{..} = do
     extractTimeGrid = head . toColumns
     dropTimeGrid :: Matrix Double -> Matrix Double
     dropTimeGrid = fromColumns . tail . toColumns
-
--- | The common solving logic between ARKode and CVode
-solveCommon
-  :: (IsMethod method, Katip m)
-  => (CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CInt)
-      -- ^ the CVode/ARKode solving function; mostly inline-C code
-  -> ODEOpts method
-  -> OdeProblem
-  -> m (Either ErrorDiagnostics SundialsSolution)
-solveCommon solve_c opts problem@(OdeProblem{..})
-
-  | VS.null odeInitCond = -- 0-dimensional (empty) system
-
-    return . Right $ SundialsSolution
-      { actualTimeGrid = odeSolTimes
-      , solutionMatrix = (VS.length odeSolTimes >< 0) []
-      , diagnostics = mempty
-      }
-
-  | otherwise = do
-
-    log_env <- getLogEnv
-    liftIO $ do -- the rest is in the IO monad
-    vars <- allocateCVars problem
-    ret <- withCConsts opts problem $ \consts ->
-      solve_c consts vars log_env
-    frozenVars <- freezeCVars vars
-    assembleSolverResult problem ret frozenVars
 
 -- | An auxiliary function to construct a storable vector from a C pointer
 -- and length.
@@ -548,31 +411,6 @@ data EventConditions
 eventConditionsPure :: V.Vector (Double -> VS.Vector Double -> Double) -> EventConditions
 eventConditionsPure conds = EventConditionsHaskell $ \t y ->
   V.convert $ V.map (\cond -> cond t y) conds
-
-data ODEOpts method = ODEOpts {
-    maxNumSteps :: Int32
-  , minStep     :: Double
-  , fixedStep   :: Double
-      -- ^ If this is greater than 0.0, then a fixed-size step is used.
-      --
-      -- This is only recommended for testing/debugging, not for production
-      -- use.
-      --
-      -- Also, this only has effect for ARKode; using this with CVode will
-      -- trigger an error.
-  , maxFail     :: Int32
-  , odeMethod   :: method
-  , initStep    :: Maybe Double
-    -- ^ initial step size - by default, CVode
-    -- estimates the initial step size to be the
-    -- solution \(h\) of the equation
-    -- \(\|\frac{h^2\ddot{y}}{2}\| = 1\), where
-    -- \(\ddot{y}\) is an estimated value of the second
-    -- derivative of the solution at \(t_0\)
-  , jacobianRepr :: JacobianRepr
-    -- ^ use a sparse matrix to represent the Jacobian
-    -- and a sparse linear solver for Newton iterations
-  } deriving (Show)
 
 data SundialsDiagnostics = SundialsDiagnostics {
     odeGetNumSteps               :: Int

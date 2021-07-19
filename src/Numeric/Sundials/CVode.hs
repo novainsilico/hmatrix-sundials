@@ -10,6 +10,7 @@ import qualified Language.C.Inline as C
 import qualified Data.Vector.Storable as VS
 import Foreign.C.Types
 import GHC.Prim
+import GHC.Generics
 import Katip
 
 import Numeric.Sundials.Foreign
@@ -35,12 +36,11 @@ C.include "../../helpers.h"
 -- | Available methods for CVode
 data CVMethod = ADAMS
               | BDF
-  deriving (Eq, Ord, Show, Read)
+  deriving (Eq, Ord, Show, Read, Generic)
 
 instance IsMethod CVMethod where
   methodToInt ADAMS = cV_ADAMS
   methodToInt BDF   = cV_BDF
-  methodSolver = CVode
   methodType _ = Implicit
 
 solveC :: CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CInt

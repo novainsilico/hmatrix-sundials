@@ -48,17 +48,17 @@ emptyOdeProblem = OdeProblem
       , odeTolerances = defaultTolerances
       }
 
-data OdeSolver = forall method . (Show method, IsMethod method) => OdeSolver
+data OdeSolver = OdeSolver
   String -- name
-  [method]
+  [OdeMethod]
 
 availableSolvers :: [OdeSolver]
 availableSolvers =
-  [ OdeSolver "CVode"  [BDF, ADAMS]
-  , OdeSolver "ARKode" [SDIRK_5_3_4, TRBDF2_3_3_2, FEHLBERG_6_4_5]
+  [ OdeSolver "CVode"  (CVMethod <$> [BDF, ADAMS])
+  , OdeSolver "ARKode" (ARKMethod <$> [SDIRK_5_3_4, TRBDF2_3_3_2, FEHLBERG_6_4_5])
   ]
 
-defaultOpts :: method -> ODEOpts method
+defaultOpts :: OdeMethod -> ODEOpts
 defaultOpts method = ODEOpts
   { maxNumSteps = 1e5
   , minStep     = 1.0e-14
@@ -135,16 +135,20 @@ compareSolutions same_method a b = asum @[]
   where
     precision = if same_method then 1e-10 else 1e-1
 
+methodSolver :: OdeMethod -> String
+methodSolver = \case
+  ARKMethod{} -> "ARKode"
+  CVMethod{} -> "CVode"
+
 odeGoldenTest
-  :: forall method . (IsMethod method, Show method)
-  => Bool -- ^ compare between methods? (via a canonical golden file)
-  -> ODEOpts method -- ^ ode options (affect the golden file name)
+  :: Bool -- ^ compare between methods? (via a canonical golden file)
+  -> ODEOpts -- ^ ode options (affect the golden file name)
   -> String -- ^ name (of both the test and the file)
   -> IO (Either ErrorDiagnostics SundialsSolution)
   -> TestTree
 odeGoldenTest do_canonical opts name action =
   let
-    method_dir = show (methodSolver @method) </> show (odeMethod opts)
+    method_dir = methodSolver (odeMethod opts) </> show (odeMethod opts)
   in
     testGroup name $ do
       (dir, type_, same_method) <-

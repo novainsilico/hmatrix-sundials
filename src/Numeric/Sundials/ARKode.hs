@@ -10,6 +10,7 @@ import qualified Language.C.Inline as C
 import qualified Data.Vector.Storable as VS
 import Foreign.C.Types
 import GHC.Prim
+import GHC.Generics
 import Katip
 
 import Numeric.Sundials.Foreign
@@ -57,7 +58,7 @@ data ARKMethod = SDIRK_2_1_2
                | ARK548L2SA_ERK_8_4_5
                | VERNER_8_5_6
                | FEHLBERG_13_7_8
-  deriving Show
+  deriving (Eq, Ord, Show, Read, Generic)
 
 instance IsMethod ARKMethod where
   methodToInt SDIRK_2_1_2             = sDIRK_2_1_2
@@ -85,7 +86,6 @@ instance IsMethod ARKMethod where
   methodToInt VERNER_8_5_6            = vERNER_8_5_6
   methodToInt FEHLBERG_13_7_8         = fEHLBERG_13_7_8
 
-  methodSolver = ARKode
   methodType method =
     if methodToInt method < mIN_DIRK_NUM
       then Explicit
