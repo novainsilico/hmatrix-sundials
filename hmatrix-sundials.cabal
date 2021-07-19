@@ -40,8 +40,7 @@ library
   other-extensions:    QuasiQuotes
   hs-source-dirs:      src
   exposed-modules:     Numeric.Sundials
-  other-modules:       Numeric.Sundials.Types
-                       Numeric.Sundials.ARKode
+  other-modules:       Numeric.Sundials.ARKode
                        Numeric.Sundials.CVode
                        Numeric.Sundials.Foreign
                        Numeric.Sundials.Common

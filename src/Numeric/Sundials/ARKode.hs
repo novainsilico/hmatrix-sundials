@@ -13,7 +13,6 @@ import GHC.Prim
 import Katip
 
 import Numeric.Sundials.Foreign
-import Numeric.Sundials.Types
 import Numeric.Sundials.Common
 
 C.context (C.baseCtx <> C.vecCtx <> C.funCtx <> sunCtx)
