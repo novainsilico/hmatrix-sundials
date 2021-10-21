@@ -58,7 +58,7 @@ data ARKMethod = SDIRK_2_1_2
                | ARK548L2SA_ERK_8_4_5
                | VERNER_8_5_6
                | FEHLBERG_13_7_8
-  deriving (Eq, Ord, Show, Read, Generic)
+  deriving (Eq, Ord, Show, Read, Generic, Bounded, Enum)
 
 instance IsMethod ARKMethod where
   methodToInt SDIRK_2_1_2             = sDIRK_2_1_2

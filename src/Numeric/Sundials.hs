@@ -28,6 +28,7 @@ module Numeric.Sundials
   , OdeMethod(..)
   , ARK.ARKMethod(..)
   , CV.CVMethod(..)
+  , allOdeMethods
   , IsMethod(..)
   , MethodType(..)
   , Tolerances(..)
@@ -74,10 +75,17 @@ import Control.Monad.IO.Class
 import Control.Monad.Cont
 import Control.Exception
 
+-- | A supported ODE solving method, either by CVode or ARKode
 data OdeMethod
   = CVMethod CV.CVMethod
   | ARKMethod ARK.ARKMethod
   deriving (Eq, Ord, Show, Read, Generic)
+
+-- | List of all supported ODE methods
+allOdeMethods :: [OdeMethod]
+allOdeMethods =
+  (CVMethod <$> [minBound .. maxBound]) ++
+  (ARKMethod <$> [minBound .. maxBound])
 
 instance IsMethod OdeMethod where
   methodToInt = \case

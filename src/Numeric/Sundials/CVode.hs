@@ -36,7 +36,7 @@ C.include "../../helpers.h"
 -- | Available methods for CVode
 data CVMethod = ADAMS
               | BDF
-  deriving (Eq, Ord, Show, Read, Generic)
+  deriving (Eq, Ord, Show, Read, Generic, Bounded, Enum)
 
 instance IsMethod CVMethod where
   methodToInt ADAMS = cV_ADAMS
