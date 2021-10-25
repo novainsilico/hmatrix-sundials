@@ -1,16 +1,16 @@
+cabal-version:       2.4
 name:                hmatrix-sundials
 version:             0.20.0.0
 synopsis:            hmatrix interface to sundials
 description:         An interface to the solving suite SUNDIALS.
-license:             BSD3
+license:             BSD-3-Clause
 license-file:        LICENSE
 author:              Dominic Steinitz
 maintainer:          Roman Cheplyaka
 copyright:           Dominic Steinitz 2018, Novadiscovery 2019
 category:            Math
 build-type:          Simple
-extra-source-files:  ChangeLog.md, README.md
-cabal-version:       >=1.18
+extra-source-files:  ChangeLog.md, README.md, tests/golden/**/*.json
 
 flag debug
   description: Perform debug logging
