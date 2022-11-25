@@ -64,6 +64,9 @@ solveC CConsts{..} CVars{..} log_env =
   void *cvode_mem = NULL;    /* empty CVODE memory structure                 */
   realtype t;
   long int nst, nfe, nsetups, nje, nfeLS, nni, ncfn, netf;
+  SUNContext sunctx;
+
+  SUNContext_Create(NULL, &sunctx);
 
   /* input_ind tracks the current index into the c_sol_time array */
   int input_ind = 1;
@@ -108,7 +111,7 @@ solveC CConsts{..} CVars{..} log_env =
   /* Initialize odeMaxEventsReached to False */
   ($vec-ptr:(sunindextype *c_diagnostics))[10] = 0;
 
-  y = N_VNew_Serial(c_dim); /* Create serial vector for solution */
+  y = N_VNew_Serial(c_dim, sunctx); /* Create serial vector for solution */
   if (check_flag((void *)y, "N_VNew_Serial", 0, report_error)) return 6896;
   /* Specify initial condition */
   for (i = 0; i < c_dim; i++) {
@@ -116,7 +119,7 @@ solveC CConsts{..} CVars{..} log_env =
   };
 
   // NB: Uses the Newton solver by default
-  cvode_mem = CVodeCreate($(int c_method));
+  cvode_mem = CVodeCreate($(int c_method), sunctx);
   if (check_flag((void *)cvode_mem, "CVodeCreate", 0, report_error)) return(8396);
   flag = CVodeInit(cvode_mem, $(int (* c_rhs) (realtype, N_Vector, N_Vector, UserData*)), T0, y);
   if (check_flag(&flag, "CVodeInit", 1, report_error)) return(1960);
@@ -129,7 +132,7 @@ solveC CConsts{..} CVars{..} log_env =
   flag = CVodeSetUserData(cvode_mem, $(UserData* c_rhs_userdata));
   if (check_flag(&flag, "CVodeSetUserData", 1, report_error)) return(1949);
 
-  tv = N_VNew_Serial(c_dim); /* Create serial vector for absolute tolerances */
+  tv = N_VNew_Serial(c_dim, sunctx); /* Create serial vector for absolute tolerances */
   if (check_flag((void *)tv, "N_VNew_Serial", 0, report_error)) return 6471;
   /* Specify tolerances */
   for (i = 0; i < c_dim; i++) {
@@ -157,20 +160,20 @@ solveC CConsts{..} CVars{..} log_env =
   /* Initialize a jacobian matrix and solver */
   int c_sparse_jac = $(int c_sparse_jac);
   if (c_sparse_jac) {
-    A = SUNSparseMatrix(c_dim, c_dim, c_sparse_jac, CSC_MAT);
+    A = SUNSparseMatrix(c_dim, c_dim, c_sparse_jac, CSC_MAT, sunctx);
     if (check_flag((void *)A, "SUNSparseMatrix", 0, report_error)) return 9061;
-    LS = SUNLinSol_KLU(y, A);
+    LS = SUNLinSol_KLU(y, A, sunctx);
     if (check_flag((void *)LS, "SUNLinSol_KLU", 0, report_error)) return 9316;
   } else {
-    A = SUNDenseMatrix(c_dim, c_dim);
+    A = SUNDenseMatrix(c_dim, c_dim, sunctx);
     if (check_flag((void *)A, "SUNDenseMatrix", 0, report_error)) return 9061;
-    LS = SUNDenseLinearSolver(y, A);
-    if (check_flag((void *)LS, "SUNDenseLinearSolver", 0, report_error)) return 9316;
+    LS = SUNLinSol_Dense(y, A, sunctx);
+    if (check_flag((void *)LS, "SUNLinSol_Dense", 0, report_error)) return 9316;
   }
 
   /* Attach matrix and linear solver */
-  flag = CVDlsSetLinearSolver(cvode_mem, LS, A);
-  if (check_flag(&flag, "CVDlsSetLinearSolver", 1, report_error)) return 2625;
+  flag = CVodeSetLinearSolver(cvode_mem, LS, A);
+  if (check_flag(&flag, "CVodeSetLinearSolver", 1, report_error)) return 2625;
 
   /* Set the initial step size if there is one */
   if ($(int c_init_step_size_set)) {
@@ -183,8 +186,8 @@ solveC CConsts{..} CVars{..} log_env =
   /* Set the Jacobian if there is one */
   if ($(int c_jac_set)) {
     CVLsJacFn c_jac = $(int (*c_jac)(realtype, N_Vector, N_Vector, SUNMatrix, UserData*, N_Vector, N_Vector, N_Vector));
-    flag = CVDlsSetJacFn(cvode_mem, c_jac);
-    if (check_flag(&flag, "CVDlsSetJacFn", 1, report_error)) return 3124;
+    flag = CVodeSetJacFn(cvode_mem, c_jac);
+    if (check_flag(&flag, "CVodeSetJacFn", 1, report_error)) return 3124;
   }
 
   /* Store initial conditions */
@@ -231,8 +234,8 @@ solveC CConsts{..} CVars{..} log_env =
     if (!(flag == CV_TOO_CLOSE && time_based_event) &&
       check_flag(&flag, "CVode", 1, report_error)) {
 
-      N_Vector ele = N_VNew_Serial(c_dim);
-      N_Vector weights = N_VNew_Serial(c_dim);
+      N_Vector ele = N_VNew_Serial(c_dim, sunctx);
+      N_Vector weights = N_VNew_Serial(c_dim, sunctx);
       flag = CVodeGetEstLocalErrors(cvode_mem, ele);
       // CV_SUCCESS is defined is 0, so we OR the flags
       flag = flag || CVodeGetErrWeights(cvode_mem, weights);
@@ -382,12 +385,12 @@ solveC CConsts{..} CVars{..} log_env =
   check_flag(&flag, "CVodeGetNumNonlinSolvConvFails", 1, report_error);
   ($vec-ptr:(sunindextype *c_diagnostics))[7] = ncfn;
 
-  flag = CVDlsGetNumJacEvals(cvode_mem, &nje);
-  check_flag(&flag, "CVDlsGetNumJacEvals", 1, report_error);
+  flag = CVodeGetNumJacEvals(cvode_mem, &nje);
+  check_flag(&flag, "CVodeGetNumJacEvals", 1, report_error);
   ($vec-ptr:(sunindextype *c_diagnostics))[8] = ncfn;
 
-  flag = CVDlsGetNumRhsEvals(cvode_mem, &nfeLS);
-  check_flag(&flag, "CVDlsGetNumRhsEvals", 1, report_error);
+  flag = CVodeGetNumLinRhsEvals(cvode_mem, &nfeLS);
+  check_flag(&flag, "CVodeGetNumLinRhsEvals", 1, report_error);
   ($vec-ptr:(sunindextype *c_diagnostics))[9] = ncfn;
 
   /* Clean up and return */
@@ -396,6 +399,7 @@ solveC CConsts{..} CVars{..} log_env =
   CVodeFree(&cvode_mem);  /* Free integrator memory */
   SUNLinSolFree(LS);      /* Free linear solver     */
   SUNMatDestroy(A);       /* Free A matrix          */
+  SUNContext_Free(&sunctx);
 
   return CV_SUCCESS;
  } |]
