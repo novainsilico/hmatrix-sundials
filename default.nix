@@ -12,16 +12,27 @@ let
 
 in
 
-{ pkgs ? import nixpkgs { overlays = [ sundialsOverlay ]; } }:
+{ pkgs ? import nixpkgs { overlays = [ sundialsOverlay ]; }
+, compiler ? "default"
+, doBenchmark ? false
+}:
 
 let
-  cabal2nixPkg = pkgs.haskellPackages.callCabal2nix "hmatrix-sundials" ./. {
+
+  variant = if doBenchmark then pkgs.haskell.lib.doBenchmark else pkgs.lib.id;
+  haskellPackages =
+    if compiler == "default"
+    then pkgs.haskellPackages
+    else pkgs.haskell.packages.${compiler};
+
+in
+variant
+  (haskellPackages.callCabal2nix "hmatrix-sundials" ./. {
     klu = pkgs.suitesparse;
     suitesparseconfig = pkgs.suitesparse;
     sundials_arkode = pkgs.sundials1;
     sundials_cvode = pkgs.sundials1;
     sundials_sunlinsolklu = pkgs.sundials1;
     sundials_sunmatrixsparse = pkgs.sundials1;
-  };
-in
-pkgs.haskellPackages.callPackage cabal2nixPkg { }
+  })
+  // { inherit haskellPackages; }
