@@ -15,16 +15,16 @@ let liblapackShared = liblapack.override {
 
 in stdenv.mkDerivation rec {
   pname = "sundials";
-  version = "5.3.0";
+  version = "6.4.1.patched";
 
   buildInputs = lib.optionals (lapackSupport) [ gfortran ];
   nativeBuildInputs =  [ cmake ];
 
   src = fetchFromGitHub {
-    owner = "novadiscovery";
-    repo = "sundials";
-    rev = "f914d2c7cb4c8084a3e64bf19cb12a55e134f18e";
-    sha256 = "sha256-hG8yDifuvo3fM4z8HU/7T4CiqycPgNmcvDjdl2Imxtc=";
+    owner = "LLNL";
+    repo = pname;
+    rev = "cbeb1766c23169a3306f7e82484ead644062b97c";
+    sha256 = "sha256-diGykyavV365bekiW9Wdty4Et7LA+D9cx4+j+/0YaA0=";
   };
 
   cmakeFlags = [
@@ -47,11 +47,11 @@ in stdenv.mkDerivation rec {
     "-DEXAMPLES_ENABLE_CXX=OFF"
     "-DEXAMPLES_INSTALL=OFF"
 
-    "-DKLU_ENABLE=ON"
+    "-DENABLE_KLU=ON"
     "-DKLU_INCLUDE_DIR=${suitesparse.dev}/include"
     "-DKLU_LIBRARY_DIR=${suitesparse}/lib"
 
-    "-DLAPACK_ENABLE=ON"
+    "-DENABLE_LAPACK=ON"
     "-DLAPACK_LIBRARIES=${liblapackShared}/lib/liblapack${stdenv.hostPlatform.extensions.sharedLibrary};${liblapackShared}/lib/libblas${stdenv.hostPlatform.extensions.sharedLibrary}"
   ];
 

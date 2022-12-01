@@ -111,6 +111,9 @@ solveC CConsts{..} CVars{..} log_env =
   void *arkode_mem = NULL;   /* empty ARKode memory structure                */
   realtype t;
   long int nst, nst_a, nfe, nfi, nsetups, nje, nfeLS, nni, ncfn, netf;
+  SUNContext sunctx;
+
+  SUNContext_Create(NULL, &sunctx);
 
   /* input_ind tracks the current index into the c_sol_time array */
   int input_ind = 1;
@@ -142,7 +145,7 @@ solveC CConsts{..} CVars{..} log_env =
   */
   double t_start = T0;
 
-  int implicit = $(int c_method) >= MIN_DIRK_NUM;
+  int implicit = $(int c_method) >= ARKODE_MIN_DIRK_NUM;
 
   /* Initialize data structures */
 
@@ -151,7 +154,7 @@ solveC CConsts{..} CVars{..} log_env =
   /* Initialize odeMaxEventsReached to False */
   ($vec-ptr:(sunindextype *c_diagnostics))[10] = 0;
 
-  y = N_VNew_Serial(c_dim); /* Create serial vector for solution */
+  y = N_VNew_Serial(c_dim, sunctx); /* Create serial vector for solution */
   if (check_flag((void *)y, "N_VNew_Serial", 0, report_error)) return 6896;
   /* Specify initial condition */
   for (i = 0; i < c_dim; i++) {
@@ -160,9 +163,9 @@ solveC CConsts{..} CVars{..} log_env =
 
   ARKRhsFn c_rhs = $(int (*c_rhs)(double, N_Vector, N_Vector, UserData*));
   if (!implicit) {
-    arkode_mem = ARKStepCreate(c_rhs, NULL, T0, y);
+    arkode_mem = ARKStepCreate(c_rhs, NULL, T0, y, sunctx);
   } else {
-    arkode_mem = ARKStepCreate(NULL, c_rhs, T0, y);
+    arkode_mem = ARKStepCreate(NULL, c_rhs, T0, y, sunctx);
   }
   if (check_flag(arkode_mem, "ARKStepCreate", 0, report_error)) return 8396;
 
@@ -180,7 +183,7 @@ solveC CConsts{..} CVars{..} log_env =
   flag = ARKStepSetUserData(arkode_mem, $(UserData* c_rhs_userdata));
   if (check_flag(&flag, "ARKStepSetUserData", 1, report_error)) return(1949);
 
-  tv = N_VNew_Serial(c_dim); /* Create serial vector for absolute tolerances */
+  tv = N_VNew_Serial(c_dim, sunctx); /* Create serial vector for absolute tolerances */
   if (check_flag((void *)tv, "N_VNew_Serial", 0, report_error)) return 6471;
   /* Specify tolerances */
   for (i = 0; i < c_dim; i++) {
@@ -209,15 +212,15 @@ solveC CConsts{..} CVars{..} log_env =
     /* Initialize a jacobian matrix and solver */
     int c_sparse_jac = $(int c_sparse_jac);
     if (c_sparse_jac) {
-      A = SUNSparseMatrix(c_dim, c_dim, c_sparse_jac, CSC_MAT);
+      A = SUNSparseMatrix(c_dim, c_dim, c_sparse_jac, CSC_MAT, sunctx);
       if (check_flag((void *)A, "SUNSparseMatrix", 0, report_error)) return 9061;
-      LS = SUNLinSol_KLU(y, A);
+      LS = SUNLinSol_KLU(y, A, sunctx);
       if (check_flag((void *)LS, "SUNLinSol_KLU", 0, report_error)) return 9316;
     } else {
-      A = SUNDenseMatrix(c_dim, c_dim);
+      A = SUNDenseMatrix(c_dim, c_dim, sunctx);
       if (check_flag((void *)A, "SUNDenseMatrix", 0, report_error)) return 9061;
-      LS = SUNDenseLinearSolver(y, A);
-      if (check_flag((void *)LS, "SUNDenseLinearSolver", 0, report_error)) return 9316;
+      LS = SUNLinSol_Dense(y, A, sunctx);
+      if (check_flag((void *)LS, "SUNLinSol_Dense", 0, report_error)) return 9316;
     }
 
       /* Attach matrix and linear solver */
@@ -288,8 +291,8 @@ solveC CConsts{..} CVars{..} log_env =
     if (!(flag == ARK_TOO_CLOSE && time_based_event) &&
       check_flag(&flag, "ARKStepEvolve", 1, report_error)) {
 
-      N_Vector ele = N_VNew_Serial(c_dim);
-      N_Vector weights = N_VNew_Serial(c_dim);
+      N_Vector ele = N_VNew_Serial(c_dim, sunctx);
+      N_Vector weights = N_VNew_Serial(c_dim, sunctx);
       flag = ARKStepGetEstLocalErrors(arkode_mem, ele);
       // ARK_SUCCESS is defined is 0, so we OR the flags
       flag = flag || ARKStepGetErrWeights(arkode_mem, weights);
@@ -455,6 +458,7 @@ solveC CConsts{..} CVars{..} log_env =
   ARKStepFree(&arkode_mem);  /* Free integrator memory */
   SUNLinSolFree(LS);        /* Free linear solver     */
   SUNMatDestroy(A);         /* Free A matrix          */
+  SUNContext_Free(&sunctx);
 
   return ARK_SUCCESS;
  } |]
