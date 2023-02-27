@@ -344,6 +344,14 @@ eventTests opts = testGroup "Events"
           }
   , odeGoldenTest True opts "Bounded_sine" $
       runKatipT ?log_env $ solve opts boundedSine
+
+  -- This test checks than an exception in the event condition is correctly
+  -- reported as a solver failure instead of a crash
+  , odeGoldenTest True opts "Exception_in_condition" $
+      runKatipT ?log_env $ solve opts (boundedSine
+        {
+          odeEventConditions = eventConditionsPure (error "I'm an error in condition code")
+        })
   ]
 
 discontinuousRhsTest opts = odeGoldenTest True opts "Discontinuous_derivative" $
