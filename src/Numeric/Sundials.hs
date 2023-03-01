@@ -74,6 +74,7 @@ import GHC.Generics
 import Control.Monad.IO.Class
 import Control.Monad.Cont
 import Control.Exception
+import Control.DeepSeq
 
 -- | A supported ODE solving method, either by CVode or ARKode
 data OdeMethod
@@ -254,9 +255,24 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
         funIO :: EventConditionCType
         funIO t y_ptr out_ptr _ptr = do
               y <- sunVecVals <$> peek y_ptr
-              -- FIXME: We should be able to use poke somehow
-              T.vectorToC (coerce f t y) (fromIntegral c_n_event_specs) out_ptr
-              return 0
+
+              -- Force the evaluation and catch exception
+              -- That's important because the following function will be called by sundials (C context).
+              -- In this context, the RTS will crash in the event of an exception.
+              -- NOTE: we force to NF using "force" in order to get all hidden
+              -- exception. However, here, that's Storable Vector, which are
+              -- strict on their argument, so forcing to NF is an O(1)
+              -- operation, it only needs to force to WHNF.
+              resM <- try (evaluate (Control.DeepSeq.force $ coerce f t y))
+              case resM of
+                Right res -> do
+                  -- FIXME: We should be able to use poke somehow
+                  T.vectorToC res (fromIntegral c_n_event_specs) out_ptr
+                  return 0
+                Left (_ :: SomeException) -> do
+                  -- There was an exception, just return a non 0 value, so
+                  -- sundial know that it must terminate the solving.
+                  return 1
       funptr <- ContT $ bracket (mkEventConditionsC funIO) freeHaskellFunPtr
       return funptr
   return CConsts{..}
