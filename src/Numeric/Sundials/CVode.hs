@@ -15,6 +15,7 @@ import Katip
 
 import Numeric.Sundials.Foreign
 import Numeric.Sundials.Common
+import Foreign.Ptr
 
 C.context (C.baseCtx <> C.vecCtx <> C.funCtx <> sunCtx)
 
@@ -43,12 +44,13 @@ instance IsMethod CVMethod where
   methodToInt BDF   = cV_BDF
   methodType _ = Implicit
 
-solveC :: CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CInt
-solveC CConsts{..} CVars{..} log_env =
+solveC :: Ptr CInt -> CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CInt
+solveC ptrStop CConsts{..} CVars{..} log_env =
   let
     report_error = reportErrorWithKatip log_env
     debug = debugMsgWithKatip log_env
-  in
+  in do
+
   [C.block| int {
   /* general problem variables */
 
@@ -197,6 +199,19 @@ solveC CConsts{..} CVars{..} log_env =
   }
 
   while (1) {
+     // The solver will run until it terminates or receive a signal to stop by the
+     // way of a non null value in *ptrSTop
+     // The signal is an exception from outside (see the solve function in
+     // Numeric/Sundials.hs
+    // Ensure proper memory barrier so that `stopFlag` is not optimised away as constant
+    int stopFlag = 0;
+    __atomic_load($(int* ptrStop), &stopFlag, __ATOMIC_SEQ_CST);
+
+    if(stopFlag)
+    {
+      break;
+    }
+
     double ti = ($vec-ptr:(double *c_sol_time))[input_ind];
     double next_time_event = ($fun:(double (*c_next_time_event)()))();
     if (next_time_event < t_start) {
