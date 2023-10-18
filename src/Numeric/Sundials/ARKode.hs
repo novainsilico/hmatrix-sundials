@@ -263,7 +263,9 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
      // way of a non null value in *ptrSTop
      // The signal is an exception from outside (see the solve function in
      // Numeric/Sundials.hs
-    // Ensure proper memory barrier so that `stopFlag` is not optimised away as constant
+    // Ensure proper memory barrier.
+    // This cannot be simply replaced by if(*ptrStop) because the compiler is free to consider ptrStop as a constant for the complete loop execution.
+    // So instead, we use __atomic_load to force the load
     int stopFlag = 0;
     __atomic_load($(int* ptrStop), &stopFlag, __ATOMIC_SEQ_CST);
 
