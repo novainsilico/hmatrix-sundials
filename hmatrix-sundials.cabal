@@ -30,7 +30,9 @@ library
                        text,
                        aeson,
                        katip,
-                       ghc-prim
+                       ghc-prim,
+                       async
+                       
   extra-libraries:     sundials_arkode
                        sundials_cvode
                        sundials_sunmatrixsparse
