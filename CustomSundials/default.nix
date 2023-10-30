@@ -25,7 +25,7 @@ let
 in
 stdenv.mkDerivation rec {
   pname = "sundials";
-  version = "6.4.1.patched";
+  version = "6.6.1";
 
   buildInputs = lib.optionals (lapackSupport) [ gfortran ];
 
@@ -34,9 +34,8 @@ stdenv.mkDerivation rec {
   src = fetchFromGitHub {
     owner = "LLNL";
     repo = pname;
-    # develop branch of LLNL/sundials corresponding to v6.4.1 + https://github.com/LLNL/sundials/pull/230
-    rev = "cbeb1766c23169a3306f7e82484ead644062b97c";
-    sha256 = "sha256-diGykyavV365bekiW9Wdty4Et7LA+D9cx4+j+/0YaA0=";
+    rev = "v6.6.1";
+    sha256 = "sha256-7wi8lRXDGLQ9DcWEPmBUlHlLHO5Xu5PqYVFlAl6HlrI=";
   };
 
   cmakeFlags =
