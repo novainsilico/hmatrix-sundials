@@ -74,10 +74,10 @@ import GHC.Generics
 import Control.Monad.IO.Class
 import Control.Monad.Cont
 import Control.Exception
-import Control.DeepSeq
 import Foreign (alloca)
 import Control.Concurrent.Async
 import Unsafe.Coerce
+import Control.Concurrent.MVar
 
 -- | A supported ODE solving method, either by CVode or ARKode
 data OdeMethod
@@ -259,6 +259,23 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
       DenseJacobian -> 0
     c_method = methodToInt odeMethod
 
+  exceptionRef <- ContT $ bracket newEmptyMVar $ \mvar -> do
+    -- If an exception happened during the execution of the solver it at
+    -- Haskell FFI call.
+    -- a) It is caught by the haskell execution context
+    -- b) It is put in the mvar
+    -- c) The haskell execution context returns 1 to the sundial solver
+    --    This is interpreted as an unrecoverable error
+    -- d) Sundials terminate
+    -- e) The exception is reread here and rethrow
+    --
+    -- Note that we do that for any kind of exception, sync or async, because
+    -- in anycase, it is rethrow.
+    res <- tryReadMVar mvar
+    case res of
+      Nothing -> pure ()
+      Just e -> throwIO e
+
   (c_rhs, c_rhs_userdata) <-
     case odeRhs of
       OdeRhsC ptr u -> return (ptr, u)
@@ -267,11 +284,16 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
           funIO :: OdeRhsCType
           funIO t y f _ptr = do
             sv <- peek y
-            r <- fun t (sunVecVals sv)
-            poke f $ SunVector { sunVecN = sunVecN sv
-                               , sunVecVals = r
-                               }
-            return 0
+
+            -- Save the exception (if any)
+            saveExceptionContext exceptionRef $ do
+              r <- fun t (sunVecVals sv)
+
+              -- Note: the following operation will force "r"
+              -- and discover any hidden exception
+              poke f $ SunVector { sunVecN = sunVecN sv
+                                 , sunVecVals = r
+                                 }
         funptr <- ContT $ bracket (mkOdeRhsC funIO) freeHaskellFunPtr
         return (funptr, nullPtr)
   c_jac <-
@@ -302,23 +324,30 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
         funIO t y_ptr out_ptr _ptr = do
               y <- sunVecVals <$> peek y_ptr
 
-              -- Force the evaluation and catch exception
-              -- That's important because the following function will be called by sundials (C context).
-              -- In this context, the RTS will crash in the event of an exception.
-              -- NOTE: we force to NF using "force" in order to get all hidden
-              -- exception. However, here, that's Storable Vector, which are
-              -- strict on their argument, so forcing to NF is an O(1)
-              -- operation, it only needs to force to WHNF.
-              resM <- try (evaluate (Control.DeepSeq.force $ unsafeCoerce f t y))
-              case resM of
-                Right res -> do
-                  -- FIXME: We should be able to use poke somehow
-                  T.vectorToC res (fromIntegral c_n_event_specs) out_ptr
-                  return 0
-                Left (_ :: SomeException) -> do
-                  -- There was an exception, just return a non 0 value, so
-                  -- sundial know that it must terminate the solving.
-                  return 1
+              saveExceptionContext exceptionRef $ do
+                 let res = unsafeCoerce f t y
+                 -- FIXME: We should be able to use poke somehow
+                 -- Note: the following operation will force "res"
+                 -- and discover any hidden exception
+                 T.vectorToC res (fromIntegral c_n_event_specs) out_ptr
       funptr <- ContT $ bracket (mkEventConditionsC funIO) freeHaskellFunPtr
       return funptr
   return CConsts{..}
+
+-- | Ensure that the @io@ does not raise any exception.
+-- If it raises, save the exception in @exceptionRef@ and return an error code
+-- to sundial, which will then terminate gracefully. The top level code is
+-- responsible to raise the exception at the end of the solving.
+saveExceptionContext :: MVar SomeException -> IO () -> IO CInt
+saveExceptionContext exceptionRef io = do
+  resM <- try io
+  case resM of
+    Right () -> do
+      -- 0 is the "everything ok" code for sundial
+      pure 0
+    Left (e :: SomeException) -> do
+      -- Save the exception
+      putMVar exceptionRef e
+      -- There was an exception, just return a non 0 value, so
+      -- sundial know that it must terminate the solving.
+      pure 1
