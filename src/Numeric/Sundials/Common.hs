@@ -477,6 +477,7 @@ data SundialsSolution =
   , solutionMatrix :: Matrix Double       -- ^ matrix of solutions: each column is an unknwown
   , diagnostics    :: SundialsDiagnostics -- ^ usual Sundials diagnostics
   }
+  deriving (Show)
 
 data ErrorDiagnostics = ErrorDiagnostics
   { errorCode :: !Int
