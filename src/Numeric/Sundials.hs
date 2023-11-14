@@ -77,6 +77,7 @@ import Control.Exception
 import Control.DeepSeq
 import Foreign (alloca)
 import Control.Concurrent.Async
+import Unsafe.Coerce
 
 -- | A supported ODE solving method, either by CVode or ARKode
 data OdeMethod
@@ -217,19 +218,19 @@ withCConsts
   -> IO r
 withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
   let
-    dim = VS.length c_init_cond
-    c_init_cond = coerce odeInitCond
+    dim = VS.length (c_init_cond :: VS.Vector SunRealType)
+    c_init_cond = unsafeCoerce odeInitCond
     c_dim = fromIntegral dim
     c_n_sol_times = fromIntegral . VS.length $ odeSolTimes
-    c_sol_time = coerce odeSolTimes
+    c_sol_time = unsafeCoerce odeSolTimes
     c_rtol = relTolerance odeTolerances
     c_atol = either (VS.replicate dim) id $ absTolerances odeTolerances
-    c_minstep = coerce minStep
-    c_fixedstep = coerce fixedStep
+    c_minstep = unsafeCoerce minStep
+    c_fixedstep = unsafeCoerce fixedStep
     c_max_n_steps = fromIntegral maxNumSteps
     c_max_err_test_fails = fromIntegral maxFail
     c_init_step_size_set = fromIntegral . fromEnum $ isJust initStep
-    c_init_step_size = coerce . fromMaybe 0 $ initStep
+    c_init_step_size = unsafeCoerce . fromMaybe 0 $ initStep
     c_n_event_specs = fromIntegral $ V.length odeEventDirections
     c_requested_event_direction = V.convert $ V.map directionToInt odeEventDirections
     c_apply_event n_events event_indices_ptr t y_ptr y'_ptr stop_solver_ptr record_event_ptr = do
@@ -237,18 +238,18 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
       y_vec <- peek y_ptr
       EventHandlerResult{..} <-
         odeEventHandler
-          (coerce t :: Double)
-          (coerce $ sunVecVals y_vec :: VS.Vector Double)
+          (unsafeCoerce t :: Double)
+          (unsafeCoerce $ sunVecVals y_vec :: VS.Vector Double)
           (VS.map fromIntegral event_indices :: VS.Vector Int)
       poke y'_ptr $ SunVector
         { sunVecN = sunVecN y_vec
-        , sunVecVals = coerce eventNewState
+        , sunVecVals = unsafeCoerce eventNewState
         }
       poke stop_solver_ptr . fromIntegral $ fromEnum eventStopSolver
       poke record_event_ptr . fromIntegral $ fromEnum eventRecord
       return 0
     c_max_events = fromIntegral odeMaxEvents
-    c_next_time_event = coerce odeTimeBasedEvents
+    c_next_time_event = unsafeCoerce odeTimeBasedEvents
     c_jac_set = fromIntegral . fromEnum $ isJust odeJacobian
     c_sparse_jac = case jacobianRepr of
       SparseJacobian (T.SparsePattern spat) ->
@@ -284,8 +285,8 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
           y <- peek y_ptr
           let jac = matrixToSunMatrix $
                 jac_fn
-                  (coerce t :: Double)
-                  (coerce $ sunVecVals y :: VS.Vector Double)
+                  (unsafeCoerce t :: Double)
+                  (unsafeCoerce $ sunVecVals y :: VS.Vector Double)
           case jacobianRepr of
             DenseJacobian -> poke jac_ptr jac
             SparseJacobian spat -> poke (castPtr jac_ptr) (T.SparseMatrix spat jac)
@@ -308,7 +309,7 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
               -- exception. However, here, that's Storable Vector, which are
               -- strict on their argument, so forcing to NF is an O(1)
               -- operation, it only needs to force to WHNF.
-              resM <- try (evaluate (Control.DeepSeq.force $ coerce f t y))
+              resM <- try (evaluate (Control.DeepSeq.force $ unsafeCoerce f t y))
               case resM of
                 Right res -> do
                   -- FIXME: We should be able to use poke somehow
