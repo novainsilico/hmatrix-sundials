@@ -217,6 +217,23 @@ withCConsts
   -> (CConsts -> IO r)
   -> IO r
 withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
+  exceptionRef <- ContT $ bracket newEmptyMVar $ \mvar -> do
+    -- If an exception happened during the execution of the solver in a
+    -- Haskell FFI call.
+    -- a) It is caught by the haskell execution context
+    -- b) It is put in the mvar
+    -- c) The haskell execution context returns 1 to the sundial solver
+    --    This is interpreted as an unrecoverable error
+    -- d) Sundials terminate
+    -- e) The exception is reread here and rethrown
+    --
+    -- Note that we do that for any kind of exception, sync or async, because
+    -- in anycase, it is rethrown.
+    res <- tryReadMVar mvar
+    case res of
+      Nothing -> pure ()
+      Just e -> throwIO e
+
   let
     dim = VS.length (c_init_cond :: VS.Vector SunRealType)
     c_init_cond = unsafeCoerce odeInitCond
@@ -236,18 +253,19 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
     c_apply_event n_events event_indices_ptr t y_ptr y'_ptr stop_solver_ptr record_event_ptr = do
       event_indices <- vecFromPtr event_indices_ptr (fromIntegral n_events)
       y_vec <- peek y_ptr
-      EventHandlerResult{..} <-
-        odeEventHandler
-          (unsafeCoerce t :: Double)
-          (unsafeCoerce $ sunVecVals y_vec :: VS.Vector Double)
-          (VS.map fromIntegral event_indices :: VS.Vector Int)
-      poke y'_ptr $ SunVector
-        { sunVecN = sunVecN y_vec
-        , sunVecVals = unsafeCoerce eventNewState
-        }
-      poke stop_solver_ptr . fromIntegral $ fromEnum eventStopSolver
-      poke record_event_ptr . fromIntegral $ fromEnum eventRecord
-      return 0
+      
+      saveExceptionContext exceptionRef $ do
+        EventHandlerResult{..} <-
+          odeEventHandler
+            (unsafeCoerce t :: Double)
+            (unsafeCoerce $ sunVecVals y_vec :: VS.Vector Double)
+            (VS.map fromIntegral event_indices :: VS.Vector Int)
+        poke y'_ptr $ SunVector
+          { sunVecN = sunVecN y_vec
+          , sunVecVals = unsafeCoerce eventNewState
+          }
+        poke stop_solver_ptr . fromIntegral $ fromEnum eventStopSolver
+        poke record_event_ptr . fromIntegral $ fromEnum eventRecord
     c_max_events = fromIntegral odeMaxEvents
     c_next_time_event = unsafeCoerce odeTimeBasedEvents
     c_jac_set = fromIntegral . fromEnum $ isJust odeJacobian
@@ -258,23 +276,6 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
         sum [ if spat VS.! (i + i * dim) == 0 then 1 else 0 | i <- [0 .. dim-1] ]
       DenseJacobian -> 0
     c_method = methodToInt odeMethod
-
-  exceptionRef <- ContT $ bracket newEmptyMVar $ \mvar -> do
-    -- If an exception happened during the execution of the solver in a
-    -- Haskell FFI call.
-    -- a) It is caught by the haskell execution context
-    -- b) It is put in the mvar
-    -- c) The haskell execution context returns 1 to the sundial solver
-    --    This is interpreted as an unrecoverable error
-    -- d) Sundials terminate
-    -- e) The exception is reread here and rethrown
-    --
-    -- Note that we do that for any kind of exception, sync or async, because
-    -- in anycase, it is rethrown.
-    res <- tryReadMVar mvar
-    case res of
-      Nothing -> pure ()
-      Just e -> throwIO e
 
   (c_rhs, c_rhs_userdata) <-
     case odeRhs of

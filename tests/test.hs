@@ -365,6 +365,17 @@ eventTests opts = testGroup "Events"
         {
           odeRhs = OdeRhsHaskell $ \_ _ -> throwIO ConditionException
         })
+  , testCase "pure exception in event handler" $
+      assertRaises ConditionException $
+        runKatipT ?log_env $ solve opts (boundedSine
+        {
+          odeEventHandler = mkEventHandler
+               [\_ y -> vector [ y ! throw ConditionException, - abs (y ! 1) ]
+               ,\_ y -> vector [ y ! 0, abs (y ! 1) ]
+               ]
+              (V.replicate 2 False)
+              (V.replicate 2 True)
+        })
   ]
 
 data ConditionException = ConditionException
