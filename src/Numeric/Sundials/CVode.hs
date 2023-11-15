@@ -315,7 +315,11 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
       if (n_events_triggered > 0 || time_based_event) {
         /* Update the state with the supplied function */
         DEBUG("Calling the event handler; n_events_triggered = %d; time_based_event = %d", n_events_triggered, time_based_event);
-        $fun:(int (* c_apply_event) (int, int*, double, N_Vector y, N_Vector z, int*, int*))(n_events_triggered, c_root_info, t, y, y, &stop_solver, &record_events);
+        int error = $fun:(int (* c_apply_event) (int, int*, double, N_Vector y, N_Vector z, int*, int*))(n_events_triggered, c_root_info, t, y, y, &stop_solver, &record_events);
+
+        // If the event handled failed internally, we stop the solving
+        if(error)
+          break;
       }
 
       if (record_events) {
