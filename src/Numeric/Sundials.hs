@@ -260,17 +260,17 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
     c_method = methodToInt odeMethod
 
   exceptionRef <- ContT $ bracket newEmptyMVar $ \mvar -> do
-    -- If an exception happened during the execution of the solver it at
+    -- If an exception happened during the execution of the solver in a
     -- Haskell FFI call.
     -- a) It is caught by the haskell execution context
     -- b) It is put in the mvar
     -- c) The haskell execution context returns 1 to the sundial solver
     --    This is interpreted as an unrecoverable error
     -- d) Sundials terminate
-    -- e) The exception is reread here and rethrow
+    -- e) The exception is reread here and rethrown
     --
     -- Note that we do that for any kind of exception, sync or async, because
-    -- in anycase, it is rethrow.
+    -- in anycase, it is rethrown.
     res <- tryReadMVar mvar
     case res of
       Nothing -> pure ()
