@@ -1,7 +1,7 @@
 {-# LANGUAGE RecordWildCards, ScopedTypeVariables, OverloadedStrings,
              ViewPatterns, ImplicitParams, OverloadedLists, RankNTypes,
              ExistentialQuantification, LambdaCase, NumDecimals, NamedFieldPuns,
-             TypeApplications, DeriveGeneric, StandaloneDeriving, FlexibleInstances #-}
+             TypeApplications, DeriveGeneric, StandaloneDeriving, FlexibleInstances, DeriveAnyClass #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 import Prelude hiding (quot, showList)
@@ -345,14 +345,46 @@ eventTests opts = testGroup "Events"
   , odeGoldenTest True opts "Bounded_sine" $
       runKatipT ?log_env $ solve opts boundedSine
 
-  -- This test checks than an exception in the event condition is correctly
+  -- This test checks that a pure exception in the event condition is correctly
   -- reported as a solver failure instead of a crash
-  , odeGoldenTest True opts "Exception_in_condition" $
-      runKatipT ?log_env $ solve opts (boundedSine
+  ,  testCase "pure exception in condition" $
+      assertRaises ConditionException $
+        runKatipT ?log_env $ solve opts (boundedSine
         {
-          odeEventConditions = eventConditionsPure (error "I'm an error in condition code")
+          odeEventConditions = eventConditionsPure (throw ConditionException)
+        })
+  ,  testCase "pure exception in rhs" $
+      assertRaises ConditionException $
+        runKatipT ?log_env $ solve opts (boundedSine
+        {
+          odeRhs = OdeRhsHaskell $ \_ _ -> return $ throw ConditionException
+        })
+  ,  testCase "impure exception in rhs" $
+      assertRaises ConditionException $
+        runKatipT ?log_env $ solve opts (boundedSine
+        {
+          odeRhs = OdeRhsHaskell $ \_ _ -> throwIO ConditionException
         })
   ]
+
+data ConditionException = ConditionException
+  deriving (Exception, Show, Eq)
+
+-- Ensures that a block of code throw a specified exception
+assertRaises
+  :: (HasCallStack, Show e, Show a, Eq e, Exception e)
+  => e
+  -- ^ The exception which should be raised
+  -> IO a
+  -- ^ The operation which should raise
+  -> IO ()
+assertRaises e' block = do
+  resM <- try block
+  case resM of
+    Right res -> assertFailure $ "Should have failed, but returned " <> show res
+    Left e
+      | e == e' -> pure ()
+      | otherwise -> assertFailure $ "Raised the wrong exception: " <> show e <> " != " <> show e'
 
 discontinuousRhsTest opts = odeGoldenTest True opts "Discontinuous_derivative" $
   runKatipT ?log_env $ solve opts discontinuousRHS
