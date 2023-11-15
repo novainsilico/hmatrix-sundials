@@ -267,7 +267,13 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
         poke stop_solver_ptr . fromIntegral $ fromEnum eventStopSolver
         poke record_event_ptr . fromIntegral $ fromEnum eventRecord
     c_max_events = fromIntegral odeMaxEvents
-    c_next_time_event = unsafeCoerce odeTimeBasedEvents
+    c_next_time_event = do
+      resM <- saveExceptionContextM exceptionRef (evaluate =<< coerce odeTimeBasedEvents)
+      case resM of
+        Just t -> pure t
+        -- -1 for next event will be interpereted by the solver as a stop
+        Nothing -> pure (-1)
+
     c_jac_set = fromIntegral . fromEnum $ isJust odeJacobian
     c_sparse_jac = case jacobianRepr of
       SparseJacobian (T.SparsePattern spat) ->
@@ -341,14 +347,21 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
 -- responsible to raise the exception at the end of the solving.
 saveExceptionContext :: MVar SomeException -> IO () -> IO CInt
 saveExceptionContext exceptionRef io = do
+  resM <- saveExceptionContextM exceptionRef io
+  case resM of
+    -- There was an exception, just return a non 0 value, so
+    -- sundial know that it must terminate the solving.
+    Nothing -> pure 1
+    -- 0 is the "everything ok" code for sundial
+    Just _ -> pure 0
+
+saveExceptionContextM :: MVar SomeException -> IO a -> IO (Maybe a)
+saveExceptionContextM exceptionRef io = do
   resM <- try io
   case resM of
-    Right () -> do
-      -- 0 is the "everything ok" code for sundial
-      pure 0
+    Right res -> do
+      pure (Just res)
     Left (e :: SomeException) -> do
       -- Save the exception
       putMVar exceptionRef e
-      -- There was an exception, just return a non 0 value, so
-      -- sundial know that it must terminate the solving.
-      pure 1
+      pure Nothing

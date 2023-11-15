@@ -276,6 +276,10 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
 
     double ti = ($vec-ptr:(double *c_sol_time))[input_ind];
     double next_time_event = ($fun:(double (*c_next_time_event)()))();
+
+    // Haskell failure in the next time event function
+    if(next_time_event == -1)
+      break;
     if (next_time_event < t_start) {
       size_t msg_size = 1000;
       char *msg = alloca(msg_size);

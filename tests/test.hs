@@ -376,6 +376,18 @@ eventTests opts = testGroup "Events"
               (V.replicate 2 False)
               (V.replicate 2 True)
         })
+  , testCase "pure exception in timespec" $ 
+      assertRaises ConditionException $
+        runKatipT ?log_env $ solve opts (boundedSine
+        {
+          odeTimeBasedEvents = TimeEventSpec $ pure $ throw ConditionException
+        })
+  , testCase "impure exception in timespec" $ 
+      assertRaises ConditionException $
+        runKatipT ?log_env $ solve opts (boundedSine
+        {
+          odeTimeBasedEvents = TimeEventSpec $ throwIO ConditionException
+        })
   ]
 
 data ConditionException = ConditionException
