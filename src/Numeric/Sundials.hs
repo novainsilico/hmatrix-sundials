@@ -303,6 +303,14 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
                                  }
         funptr <- ContT $ bracket (mkOdeRhsC funIO) freeHaskellFunPtr
         return (funptr, nullPtr)
+  let c_ontimepoint idx = do
+        case odeOnTimePoint of
+          Nothing -> pure ()
+          Just fun -> do
+            -- Save the exception (if any)
+            _ <- saveExceptionContext exceptionRef $ do
+              fun idx
+            pure ()
   c_jac <-
     case odeJacobian of
       Nothing   -> return nullFunPtr

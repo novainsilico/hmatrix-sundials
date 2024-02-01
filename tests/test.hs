@@ -46,6 +46,8 @@ emptyOdeProblem = OdeProblem
       , odeMaxEvents = 100
       , odeSolTimes = error "emptyOdeProblem: no odeSolTimes provided"
       , odeTolerances = defaultTolerances
+      -- TODO: test this callback
+      , odeOnTimePoint = Nothing
       }
 
 data OdeSolver = OdeSolver

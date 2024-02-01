@@ -135,6 +135,7 @@ data CConsts = CConsts
   , c_max_err_test_fails :: CInt
   , c_init_step_size_set :: CInt
   , c_init_step_size :: CDouble
+  , c_ontimepoint :: TimePointHandler
   }
 
 data MethodType = Explicit | Implicit
@@ -319,6 +320,12 @@ type EventHandler
     -- If the vector is empty, this is a time-based event.
   -> IO EventHandlerResult
 
+-- | This callback will be called when a timepoint is saved
+-- Maybe in the future we'll use this as a stream provider, but for now it is only used for debuging purpose.
+type TimePointHandler
+  =  CInt -- ^ timepoint index
+  -> IO ()
+
 data OdeProblem = OdeProblem
   { odeEventConditions :: EventConditions
     -- ^ The event conditions
@@ -345,6 +352,7 @@ data OdeProblem = OdeProblem
     -- larger if any events occurred.
   , odeTolerances :: Tolerances
     -- ^ How much error is tolerated in each variable.
+  , odeOnTimePoint :: Maybe TimePointHandler
   }
 
 data Tolerances = Tolerances

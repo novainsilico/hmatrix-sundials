@@ -249,6 +249,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
   for (j = 0; j < c_dim; j++) {
     ($vec-ptr:(double *c_output_mat))[0 * (c_dim + 1) + (j + 1)] = NV_Ith_S(y,j);
   }
+  $fun:(void (*c_ontimepoint)(int))(output_ind);
 
   /* Set the Runge-Kutta method */
   if (implicit) {
@@ -335,6 +336,9 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
     for (j = 0; j < c_dim; j++) {
       ($vec-ptr:(double *c_output_mat))[output_ind * (c_dim + 1) + (j + 1)] = NV_Ith_S(y,j);
     }
+
+    $fun:(void (*c_ontimepoint)(int))(output_ind);
+
     output_ind++;
     ($vec-ptr:(int *c_n_rows))[0] = output_ind;
 
@@ -392,6 +396,8 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
         for (j = 0; j < c_dim; j++) {
           ($vec-ptr:(double *c_output_mat))[output_ind * (c_dim + 1) + (j + 1)] = NV_Ith_S(y,j);
         }
+        $fun:(void (*c_ontimepoint)(int))(output_ind);
+
         event_ind++;
         output_ind++;
         ($vec-ptr:(int *c_n_rows))[0] = output_ind;
