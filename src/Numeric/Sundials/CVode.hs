@@ -198,6 +198,8 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
     ($vec-ptr:(double *c_output_mat))[0 * (c_dim + 1) + (j + 1)] = NV_Ith_S(y,j);
   }
 
+  $fun:(void (*c_ontimepoint)(int))(output_ind);
+
   while (1) {
      // The solver will run until it terminates or receive a signal to stop by the
      // way of a non null value in *ptrSTop
@@ -280,6 +282,9 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
     for (j = 0; j < c_dim; j++) {
       ($vec-ptr:(double *c_output_mat))[output_ind * (c_dim + 1) + (j + 1)] = NV_Ith_S(y,j);
     }
+
+    $fun:(void (*c_ontimepoint)(int))(output_ind);
+
     output_ind++;
     ($vec-ptr:(int *c_n_rows))[0] = output_ind;
 
@@ -342,6 +347,8 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
         for (j = 0; j < c_dim; j++) {
           ($vec-ptr:(double *c_output_mat))[output_ind * (c_dim + 1) + (j + 1)] = NV_Ith_S(y,j);
         }
+        $fun:(void (*c_ontimepoint)(int))(output_ind);
+
         event_ind++;
         output_ind++;
         ($vec-ptr:(int *c_n_rows))[0] = output_ind;
