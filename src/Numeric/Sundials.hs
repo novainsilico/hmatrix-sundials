@@ -76,7 +76,6 @@ import Control.Monad.Cont
 import Control.Exception
 import Foreign (alloca)
 import Control.Concurrent.Async
-import Unsafe.Coerce
 import Control.Concurrent.MVar
 
 -- | A supported ODE solving method, either by CVode or ARKode
@@ -236,18 +235,18 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
 
   let
     dim = VS.length (c_init_cond :: VS.Vector SunRealType)
-    c_init_cond = unsafeCoerce odeInitCond
+    c_init_cond = VS.unsafeCoerceVector odeInitCond
     c_dim = fromIntegral dim
     c_n_sol_times = fromIntegral . VS.length $ odeSolTimes
-    c_sol_time = unsafeCoerce odeSolTimes
+    c_sol_time = VS.unsafeCoerceVector odeSolTimes
     c_rtol = relTolerance odeTolerances
     c_atol = either (VS.replicate dim) id $ absTolerances odeTolerances
-    c_minstep = unsafeCoerce minStep
-    c_fixedstep = unsafeCoerce fixedStep
+    c_minstep = coerce minStep
+    c_fixedstep = coerce fixedStep
     c_max_n_steps = fromIntegral maxNumSteps
     c_max_err_test_fails = fromIntegral maxFail
     c_init_step_size_set = fromIntegral . fromEnum $ isJust initStep
-    c_init_step_size = unsafeCoerce . fromMaybe 0 $ initStep
+    c_init_step_size =  maybe 0 coerce initStep
     c_n_event_specs = fromIntegral $ V.length odeEventDirections
     c_requested_event_direction = V.convert $ V.map directionToInt odeEventDirections
     c_apply_event n_events event_indices_ptr t y_ptr y'_ptr stop_solver_ptr record_event_ptr = do
@@ -257,12 +256,12 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
       saveExceptionContext exceptionRef $ do
         EventHandlerResult{..} <-
           odeEventHandler
-            (unsafeCoerce t :: Double)
-            (unsafeCoerce $ sunVecVals y_vec :: VS.Vector Double)
+            (coerce t :: Double)
+            (VS.unsafeCoerceVector $ sunVecVals y_vec :: VS.Vector Double)
             (VS.map fromIntegral event_indices :: VS.Vector Int)
         poke y'_ptr $ SunVector
           { sunVecN = sunVecN y_vec
-          , sunVecVals = unsafeCoerce eventNewState
+          , sunVecVals = VS.unsafeCoerceVector eventNewState
           }
         poke stop_solver_ptr . fromIntegral $ fromEnum eventStopSolver
         poke record_event_ptr . fromIntegral $ fromEnum eventRecord
@@ -322,8 +321,8 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
           y <- peek y_ptr
           let jac = matrixToSunMatrix $
                 jac_fn
-                  (unsafeCoerce t :: Double)
-                  (unsafeCoerce $ sunVecVals y :: VS.Vector Double)
+                  (coerce t :: Double)
+                  (VS.unsafeCoerceVector $ sunVecVals y :: VS.Vector Double)
           case jacobianRepr of
             DenseJacobian -> poke jac_ptr jac
             SparseJacobian spat -> poke (castPtr jac_ptr) (T.SparseMatrix spat jac)
@@ -340,11 +339,11 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
               y <- sunVecVals <$> peek y_ptr
 
               saveExceptionContext exceptionRef $ do
-                 res <- unsafeCoerce f t y
+                 res <- f (coerce t) (VS.unsafeCoerceVector y)
                  -- FIXME: We should be able to use poke somehow
                  -- Note: the following operation will force "res"
                  -- and discover any hidden exception
-                 T.vectorToC res (fromIntegral c_n_event_specs) out_ptr
+                 T.vectorToC (VS.unsafeCoerceVector res) (fromIntegral c_n_event_specs) out_ptr
       funptr <- ContT $ bracket (mkEventConditionsC funIO) freeHaskellFunPtr
       return funptr
   return CConsts{..}

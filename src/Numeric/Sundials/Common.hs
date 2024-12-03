@@ -24,7 +24,6 @@ import Foreign.ForeignPtr
 import Language.C.Types as CT
 import Language.C.Inline.Context
 import qualified Language.Haskell.TH as TH
-import Unsafe.Coerce
 
 -- | A collection of variables that we allocate on the Haskell side and
 -- pass into the C code to be filled.
@@ -150,7 +149,7 @@ matrixToSunMatrix m = T.SunMatrix { T.rows = nr, T.cols = nc, T.vals = vs }
   where
     nr = fromIntegral $ H.rows m
     nc = fromIntegral $ H.cols m
-    vs = unsafeCoerce . VS.concat $ toColumns m
+    vs = VS.unsafeCoerceVector . VS.concat $ toColumns m
 
 -- Contrary to the documentation, it appears that CVodeGetRootInfo
 -- may use both 1 and -1 to indicate a root, depending on the
@@ -189,11 +188,11 @@ assembleSolverResult OdeProblem{..} ret CVars{..} = do
   let
     dim = VS.length odeInitCond
     n_rows = fromIntegral . VS.head $ c_n_rows
-    output_mat = unsafeCoerce . reshape (dim + 1) . subVector 0 ((dim + 1) * n_rows) $ c_output_mat
+    output_mat = reshape (dim + 1) . VS.unsafeCoerceVector . subVector 0 ((dim + 1) * n_rows) $ c_output_mat
     (local_errors, var_weights) =
       if c_local_error_set VS.! 0 == 0
         then (mempty, mempty)
-        else unsafeCoerce (c_local_error, c_var_weight)
+        else (VS.unsafeCoerceVector c_local_error, VS.unsafeCoerceVector c_var_weight)
     diagnostics = SundialsDiagnostics
       (fromIntegral $ c_diagnostics VS.!0)
       (fromIntegral $ c_diagnostics VS.!1)
