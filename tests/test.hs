@@ -123,16 +123,18 @@ compareSolutions
 compareSolutions same_method a b = asum @[]
   [ do
       guard . not $ VS.length (actualTimeGrid a) == VS.length (actualTimeGrid b)
-      return "Different length of actualTimeGrid"
+      return $ "Different length of actualTimeGrid:" <> show (VS.length (actualTimeGrid a), VS.length (actualTimeGrid b)) <> "."
   , do
-      guard . not $ norm_Inf (actualTimeGrid a - actualTimeGrid b) < precision
-      return "Different values of actualTimeGrid"
+      let diff = norm_Inf (actualTimeGrid a - actualTimeGrid b)
+      guard . not $ diff < precision
+      return $ "Different values of actualTimeGrid: " <> show diff <> " > " <> show precision <> "."
   , do
       guard . not $ size (solutionMatrix a) == size (solutionMatrix b)
-      return "Different sizes of the solutionMatrix"
+      return $ "Different sizes of the solutionMatrix: " <> show (size (solutionMatrix a), size (solutionMatrix b)) <> "."
   , do
-      guard . not $ norm_Inf (solutionMatrix a - solutionMatrix b) < precision
-      return "Different values in the solutionMatrix"
+      let diff = norm_Inf (solutionMatrix a - solutionMatrix b)
+      guard . not $ diff < precision
+      return $ "Different values in the solutionMatrix: " <> show diff <> " > " <> show precision <> "."
   ]
   where
     precision = if same_method then 1e-10 else 1e-1
