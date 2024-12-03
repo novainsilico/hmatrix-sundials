@@ -31,6 +31,7 @@ C.include "<sunmatrix/sunmatrix_dense.h>"
 C.include "<sunlinsol/sunlinsol_dense.h>"
 C.include "<sunlinsol/sunlinsol_klu.h>"
 C.include "<sundials/sundials_types.h>"
+C.include "<sundials/sundials_types_deprecated.h>"
 C.include "<sundials/sundials_math.h>"
 C.include "../../helpers.h"
 
@@ -96,6 +97,7 @@ solveC :: Ptr CInt -> CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CI
 solveC ptrStop CConsts{..} CVars{..} log_env =
   let
     report_error = reportErrorWithKatip log_env
+    report_error_new_api = wrapErrorNewApi (reportErrorWithKatip log_env)
   in do
   [C.block| int {
   /* general problem variables */
@@ -114,7 +116,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
   long int nst, nst_a, nfe, nfi, nsetups, nje, nfeLS, nni, ncfn, netf;
   SUNContext sunctx;
 
-  SUNContext_Create(NULL, &sunctx);
+  SUNContext_Create(SUN_COMM_NULL, &sunctx);
 
   /* input_ind tracks the current index into the c_sol_time array */
   int input_ind = 1;
@@ -150,7 +152,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
 
   /* Initialize data structures */
 
-  ARKErrHandlerFn report_error = $fun:(void (*report_error)(int,const char*, const char*, char*, void*));
+  void (*report_error)(int,const char*, const char*, char*, void*) = $fun:(void (*report_error)(int,const char*, const char*, char*, void*));
 
   /* Initialize odeMaxEventsReached to False */
   ($vec-ptr:(sunindextype *c_diagnostics))[10] = 0;
@@ -171,8 +173,9 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
   if (check_flag(arkode_mem, "ARKStepCreate", 0, report_error)) return 8396;
 
   /* Set the error handler */
-  flag = ARKStepSetErrHandlerFn(arkode_mem, report_error, NULL);
-  if (check_flag(&flag, "ARKStepSetErrHandlerFn", 1, report_error)) return 1093;
+  SUNErrHandlerFn report_error_new_api = (SUNErrHandlerFn) $fun:(void (*report_error_new_api)(int,const char*, const char*, const char*, int, void*, void *));
+  flag = SUNContext_PushErrHandler(sunctx, report_error_new_api, NULL);
+  if (check_flag(&flag, "SUNContext_PushErrHandler", 1, report_error)) return 1093;
 
   double c_fixedstep = $(double c_fixedstep);
   if (c_fixedstep > 0.0) {

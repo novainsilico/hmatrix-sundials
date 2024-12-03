@@ -259,6 +259,7 @@ instance ToObject SundialsErrorContext
 instance LogItem SundialsErrorContext where
   payloadKeys _ _ = AllKeys
 
+
 type ReportErrorFn =
   (  CInt    -- error code
   -> CString -- module name
@@ -267,6 +268,19 @@ type ReportErrorFn =
   -> Ptr ()  -- user data (ignored)
   -> IO ()
   )
+
+type ReportErrorFnNew =
+                 CInt -- Line no
+                -> Ptr CChar -- function name
+                -> Ptr CChar -- file
+                -> Ptr CChar -- message
+                -> CInt -- err code
+                -> Ptr () -- user data
+                -> Ptr () -- sundial context
+                -> IO ()
+
+wrapErrorNewApi :: ReportErrorFn -> ReportErrorFnNew
+wrapErrorNewApi f _lineNumber functionName moduleName errorMessage errorCode userData _sundialContext = f errorCode moduleName functionName errorMessage userData
 
 cstringToText :: CString -> IO T.Text
 cstringToText = fmap T.decodeUtf8 . BS.packCString
