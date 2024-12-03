@@ -340,7 +340,7 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
               y <- sunVecVals <$> peek y_ptr
 
               saveExceptionContext exceptionRef $ do
-                 let res = unsafeCoerce f t y
+                 res <- unsafeCoerce f t y
                  -- FIXME: We should be able to use poke somehow
                  -- Note: the following operation will force "res"
                  -- and discover any hidden exception
