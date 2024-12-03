@@ -8,7 +8,8 @@
     opt == 2 means function allocates memory so check if returned
              NULL pointer
 */
-int check_flag(void *flagvalue, const char *funcname, int opt, ARKErrHandlerFn report_error)
+
+int check_flag(void *flagvalue, const char *funcname, int opt, void (*report_error)(int,const char*, const char*, char*, void*)) 
 {
   int *errflag;
 

@@ -116,7 +116,7 @@ newtype SparsePattern = SparsePattern (VS.Vector Int8)
 data SparseMatrix = SparseMatrix SparsePattern SunMatrix
 
 type SunIndexType = #ctype sunindextype
-type SunRealType = #ctype realtype
+type SunRealType = #ctype sunrealtype
 
 getMatrixDataFromContents :: Ptr SunMatrix -> IO SunMatrix
 getMatrixDataFromContents ptr = do

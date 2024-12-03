@@ -29,9 +29,10 @@ C.include "<nvector/nvector_serial.h>"
 C.include "<sunmatrix/sunmatrix_dense.h>"
 C.include "<sunlinsol/sunlinsol_dense.h>"
 C.include "<sunlinsol/sunlinsol_klu.h>"
-C.include "<cvode/cvode_direct.h>"
 C.include "<sundials/sundials_types.h>"
+C.include "<sundials/sundials_types_deprecated.h>"
 C.include "<sundials/sundials_math.h>"
+C.include "<sundials/sundials_core.h>"
 C.include "../../helpers.h"
 
 -- | Available methods for CVode
@@ -48,6 +49,7 @@ solveC :: Ptr CInt -> CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CI
 solveC ptrStop CConsts{..} CVars{..} log_env =
   let
     report_error = reportErrorWithKatip log_env
+    report_error_new_api = wrapErrorNewApi (reportErrorWithKatip log_env)
     debug = debugMsgWithKatip log_env
   in do
 
@@ -68,7 +70,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
   long int nst, nfe, nsetups, nje, nfeLS, nni, ncfn, netf;
   SUNContext sunctx;
 
-  SUNContext_Create(NULL, &sunctx);
+  SUNContext_Create(SUN_COMM_NULL, &sunctx);
 
   /* input_ind tracks the current index into the c_sol_time array */
   int input_ind = 1;
@@ -102,7 +104,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
 
   /* Initialize data structures */
 
-  ARKErrHandlerFn report_error = $fun:(void (*report_error)(int,const char*, const char*, char*, void*));
+  void (*report_error)(int,const char*, const char*, char*, void*) = $fun:(void (*report_error)(int,const char*, const char*, char*, void*));
   void (*debug)(char*) = $fun:(void (*debug)(char*));
 
   if ($(double c_fixedstep) > 0.0) {
@@ -127,7 +129,9 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
   if (check_flag(&flag, "CVodeInit", 1, report_error)) return(1960);
 
   /* Set the error handler */
-  flag = CVodeSetErrHandlerFn(cvode_mem, report_error, NULL);
+
+  SUNErrHandlerFn report_error_new_api = (SUNErrHandlerFn) $fun:(void (*report_error_new_api)(int,const char*, const char*, const char*, int, void*, void *));
+  flag = SUNContext_PushErrHandler(sunctx, report_error_new_api, NULL);
   if (check_flag(&flag, "CVodeSetErrHandlerFn", 1, report_error)) return 1093;
 
   /* Set the user data */

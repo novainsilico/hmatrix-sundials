@@ -31,6 +31,7 @@ C.include "<sunmatrix/sunmatrix_dense.h>"
 C.include "<sunlinsol/sunlinsol_dense.h>"
 C.include "<sunlinsol/sunlinsol_klu.h>"
 C.include "<sundials/sundials_types.h>"
+C.include "<sundials/sundials_types_deprecated.h>"
 C.include "<sundials/sundials_math.h>"
 C.include "../../helpers.h"
 
@@ -96,6 +97,7 @@ solveC :: Ptr CInt -> CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CI
 solveC ptrStop CConsts{..} CVars{..} log_env =
   let
     report_error = reportErrorWithKatip log_env
+    report_error_new_api = wrapErrorNewApi (reportErrorWithKatip log_env)
   in do
   [C.block| int {
   /* general problem variables */
@@ -114,7 +116,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
   long int nst, nst_a, nfe, nfi, nsetups, nje, nfeLS, nni, ncfn, netf;
   SUNContext sunctx;
 
-  SUNContext_Create(NULL, &sunctx);
+  SUNContext_Create(SUN_COMM_NULL, &sunctx);
 
   /* input_ind tracks the current index into the c_sol_time array */
   int input_ind = 1;
@@ -150,7 +152,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
 
   /* Initialize data structures */
 
-  ARKErrHandlerFn report_error = $fun:(void (*report_error)(int,const char*, const char*, char*, void*));
+  void (*report_error)(int,const char*, const char*, char*, void*) = $fun:(void (*report_error)(int,const char*, const char*, char*, void*));
 
   /* Initialize odeMaxEventsReached to False */
   ($vec-ptr:(sunindextype *c_diagnostics))[10] = 0;
@@ -171,18 +173,19 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
   if (check_flag(arkode_mem, "ARKStepCreate", 0, report_error)) return 8396;
 
   /* Set the error handler */
-  flag = ARKStepSetErrHandlerFn(arkode_mem, report_error, NULL);
-  if (check_flag(&flag, "ARKStepSetErrHandlerFn", 1, report_error)) return 1093;
+  SUNErrHandlerFn report_error_new_api = (SUNErrHandlerFn) $fun:(void (*report_error_new_api)(int,const char*, const char*, const char*, int, void*, void *));
+  flag = SUNContext_PushErrHandler(sunctx, report_error_new_api, NULL);
+  if (check_flag(&flag, "SUNContext_PushErrHandler", 1, report_error)) return 1093;
 
   double c_fixedstep = $(double c_fixedstep);
   if (c_fixedstep > 0.0) {
-    flag = ARKStepSetFixedStep(arkode_mem, c_fixedstep);
-    if (check_flag(&flag, "ARKStepSetFixedStep", 1, report_error)) return(1);
+    flag = ARKodeSetFixedStep(arkode_mem, c_fixedstep);
+    if (check_flag(&flag, "ARKodeSetFixedStep", 1, report_error)) return(1);
   }
 
   /* Set the user data */
-  flag = ARKStepSetUserData(arkode_mem, $(UserData* c_rhs_userdata));
-  if (check_flag(&flag, "ARKStepSetUserData", 1, report_error)) return(1949);
+  flag = ARKodeSetUserData(arkode_mem, $(UserData* c_rhs_userdata));
+  if (check_flag(&flag, "ARKodeSetUserData", 1, report_error)) return(1949);
 
   tv = N_VNew_Serial(c_dim, sunctx); /* Create serial vector for absolute tolerances */
   if (check_flag((void *)tv, "N_VNew_Serial", 0, report_error)) return 6471;
@@ -191,23 +194,23 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
     NV_Ith_S(tv,i) = ($vec-ptr:(double *c_atol))[i];
   };
 
-  flag = ARKStepSetMinStep(arkode_mem, $(double c_minstep));
-  if (check_flag(&flag, "ARKStepSetMinStep", 1, report_error)) return 6433;
-  flag = ARKStepSetMaxNumSteps(arkode_mem, $(sunindextype c_max_n_steps));
-  if (check_flag(&flag, "ARKStepSetMaxNumSteps", 1, report_error)) return 9904;
-  flag = ARKStepSetMaxErrTestFails(arkode_mem, $(int c_max_err_test_fails));
-  if (check_flag(&flag, "ARKStepSetMaxErrTestFails", 1, report_error)) return 2512;
+  flag = ARKodeSetMinStep(arkode_mem, $(double c_minstep));
+  if (check_flag(&flag, "ARKodeSetMinStep", 1, report_error)) return 6433;
+  flag = ARKodeSetMaxNumSteps(arkode_mem, $(sunindextype c_max_n_steps));
+  if (check_flag(&flag, "ARKodeSetMaxNumSteps", 1, report_error)) return 9904;
+  flag = ARKodeSetMaxErrTestFails(arkode_mem, $(int c_max_err_test_fails));
+  if (check_flag(&flag, "ARKodeSetMaxErrTestFails", 1, report_error)) return 2512;
 
   /* Specify the scalar relative tolerance and vector absolute tolerances */
-  flag = ARKStepSVtolerances(arkode_mem, $(double c_rtol), tv);
-  if (check_flag(&flag, "ARKStepSVtolerances", 1, report_error)) return(6212);
+  flag = ARKodeSVtolerances(arkode_mem, $(double c_rtol), tv);
+  if (check_flag(&flag, "ARKodeSVtolerances", 1, report_error)) return(6212);
 
   /* Specify the root function */
-  flag = ARKStepRootInit(arkode_mem, $(int c_n_event_specs), $(int (* c_event_fn) (realtype, N_Vector, realtype*, UserData*)));
-  if (check_flag(&flag, "ARKStepRootInit", 1, report_error)) return(6290);
+  flag = ARKodeRootInit(arkode_mem, $(int c_n_event_specs), $(int (* c_event_fn) (realtype, N_Vector, realtype*, UserData*)));
+  if (check_flag(&flag, "ARKodeRootInit", 1, report_error)) return(6290);
   /* Disable the inactive roots warning; see https://git.novadiscovery.net/jinko/jinko/-/issues/2368 */
-  flag = ARKStepSetNoInactiveRootWarn(arkode_mem);
-  if (check_flag(&flag, "ARKStepSetNoInactiveRootWarn", 1, report_error)) return(6291);
+  flag = ARKodeSetNoInactiveRootWarn(arkode_mem);
+  if (check_flag(&flag, "ARKodeSetNoInactiveRootWarn", 1, report_error)) return(6291);
 
   if (implicit) {
     /* Initialize a jacobian matrix and solver */
@@ -225,23 +228,23 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
     }
 
       /* Attach matrix and linear solver */
-      flag = ARKStepSetLinearSolver(arkode_mem, LS, A);
-      if (check_flag(&flag, "ARKStepSetLinearSolver", 1, report_error)) return 2625;
+      flag = ARKodeSetLinearSolver(arkode_mem, LS, A);
+      if (check_flag(&flag, "ARKodeSetLinearSolver", 1, report_error)) return 2625;
   }
 
   /* Set the initial step size if there is one */
   if ($(int c_init_step_size_set)) {
     /* FIXME: We could check if the initial step size is 0 */
     /* or even NaN and then throw an error                 */
-    flag = ARKStepSetInitStep(arkode_mem, $(double c_init_step_size));
-    if (check_flag(&flag, "ARKStepSetInitStep", 1, report_error)) return 4010;
+    flag = ARKodeSetInitStep(arkode_mem, $(double c_init_step_size));
+    if (check_flag(&flag, "ARKodeSetInitStep", 1, report_error)) return 4010;
   }
 
   /* Set the Jacobian if there is one */
   if ($(int c_jac_set) && implicit) {
     ARKLsJacFn c_jac = $(int (*c_jac)(realtype, N_Vector, N_Vector, SUNMatrix, UserData*, N_Vector, N_Vector, N_Vector));
-    flag = ARKStepSetJacFn(arkode_mem, c_jac);
-    if (check_flag(&flag, "ARKStepSetJacFn", 1, report_error)) return 3124;
+    flag = ARKodeSetJacFn(arkode_mem, c_jac);
+    if (check_flag(&flag, "ARKodeSetJacFn", 1, report_error)) return 3124;
   }
 
   /* Store initial conditions */
@@ -290,7 +293,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
       goto finish;
     }
     double next_stop_time = fmin(ti, next_time_event);
-    flag = ARKStepEvolve(arkode_mem, next_stop_time, y, &t, ARK_NORMAL); /* call integrator */
+    flag = ARKodeEvolve(arkode_mem, next_stop_time, y, &t, ARK_NORMAL); /* call integrator */
     int root_based_event = flag == ARK_ROOT_RETURN;
     int time_based_event = t == next_time_event;
     if (flag == ARK_TOO_CLOSE) {
@@ -310,13 +313,13 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
     }
     else
     if (!(flag == ARK_TOO_CLOSE && time_based_event) &&
-      check_flag(&flag, "ARKStepEvolve", 1, report_error)) {
+      check_flag(&flag, "ARKodeEvolve", 1, report_error)) {
 
       N_Vector ele = N_VNew_Serial(c_dim, sunctx);
       N_Vector weights = N_VNew_Serial(c_dim, sunctx);
-      flag = ARKStepGetEstLocalErrors(arkode_mem, ele);
+      flag = ARKodeGetEstLocalErrors(arkode_mem, ele);
       // ARK_SUCCESS is defined is 0, so we OR the flags
-      flag = flag || ARKStepGetErrWeights(arkode_mem, weights);
+      flag = flag || ARKodeGetErrWeights(arkode_mem, weights);
       if (flag == ARK_SUCCESS) {
         double *arr_ptr = N_VGetArrayPointer(ele);
         memcpy(($vec-ptr:(double *c_local_error)), arr_ptr, c_dim * sizeof(double));
@@ -355,8 +358,8 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
       int n_events_triggered = 0;
       int *c_root_info = ($vec-ptr:(int *c_root_info));
       if (root_based_event) {
-        flag = ARKStepGetRootInfo(arkode_mem, c_root_info);
-        if (check_flag(&flag, "ARKStepGetRootInfo", 1, report_error)) return 2829;
+        flag = ARKodeGetRootInfo(arkode_mem, c_root_info);
+        if (check_flag(&flag, "ARKodeGetRootInfo", 1, report_error)) return 2829;
         for (i = 0; i < $(int c_n_event_specs); i++) {
           int ev = c_root_info[i];
           int req_dir = ($vec-ptr:(const int *c_requested_event_direction))[i];
@@ -439,12 +442,12 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
   ($vec-ptr:(int *c_n_events))[0] = event_ind;
 
   /* Get some final statistics on how the solve progressed */
-  flag = ARKStepGetNumSteps(arkode_mem, &nst);
-  check_flag(&flag, "ARKStepGetNumSteps", 1, report_error);
+  flag = ARKodeGetNumSteps(arkode_mem, &nst);
+  check_flag(&flag, "ARKodeGetNumSteps", 1, report_error);
   ($vec-ptr:(sunindextype *c_diagnostics))[0] = nst;
 
-  flag = ARKStepGetNumStepAttempts(arkode_mem, &nst_a);
-  check_flag(&flag, "ARKStepGetNumStepAttempts", 1, report_error);
+  flag = ARKodeGetNumStepAttempts(arkode_mem, &nst_a);
+  check_flag(&flag, "ARKodeGetNumStepAttempts", 1, report_error);
   ($vec-ptr:(sunindextype *c_diagnostics))[1] = nst_a;
 
   flag = ARKStepGetNumRhsEvals(arkode_mem, &nfe, &nfi);
@@ -452,29 +455,29 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
   ($vec-ptr:(sunindextype *c_diagnostics))[2] = nfe;
   ($vec-ptr:(sunindextype *c_diagnostics))[3] = nfi;
 
-  flag = ARKStepGetNumLinSolvSetups(arkode_mem, &nsetups);
-  check_flag(&flag, "ARKStepGetNumLinSolvSetups", 1, report_error);
+  flag = ARKodeGetNumLinSolvSetups(arkode_mem, &nsetups);
+  check_flag(&flag, "ARKodeGetNumLinSolvSetups", 1, report_error);
   ($vec-ptr:(sunindextype *c_diagnostics))[4] = nsetups;
 
-  flag = ARKStepGetNumErrTestFails(arkode_mem, &netf);
-  check_flag(&flag, "ARKStepGetNumErrTestFails", 1, report_error);
+  flag = ARKodeGetNumErrTestFails(arkode_mem, &netf);
+  check_flag(&flag, "ARKodeGetNumErrTestFails", 1, report_error);
   ($vec-ptr:(sunindextype *c_diagnostics))[5] = netf;
 
-  flag = ARKStepGetNumNonlinSolvIters(arkode_mem, &nni);
-  check_flag(&flag, "ARKStepGetNumNonlinSolvIters", 1, report_error);
+  flag = ARKodeGetNumNonlinSolvIters(arkode_mem, &nni);
+  check_flag(&flag, "ARKodeGetNumNonlinSolvIters", 1, report_error);
   ($vec-ptr:(sunindextype *c_diagnostics))[6] = nni;
 
   if (implicit) {
-    flag = ARKStepGetNumNonlinSolvConvFails(arkode_mem, &ncfn);
-    check_flag(&flag, "ARKStepGetNumNonlinSolvConvFails", 1, report_error);
+    flag = ARKodeGetNumNonlinSolvConvFails(arkode_mem, &ncfn);
+    check_flag(&flag, "ARKodeGetNumNonlinSolvConvFails", 1, report_error);
     ($vec-ptr:(sunindextype *c_diagnostics))[7] = ncfn;
 
-    flag = ARKStepGetNumJacEvals(arkode_mem, &nje);
-    check_flag(&flag, "ARKStepGetNumJacEvals", 1, report_error);
+    flag = ARKodeGetNumJacEvals(arkode_mem, &nje);
+    check_flag(&flag, "ARKodeGetNumJacEvals", 1, report_error);
     ($vec-ptr:(sunindextype *c_diagnostics))[8] = ncfn;
 
-    flag = ARKStepGetNumLinRhsEvals(arkode_mem, &nfeLS);
-    check_flag(&flag, "ARKStepGetNumRhsEvals", 1, report_error);
+    flag = ARKodeGetNumLinRhsEvals(arkode_mem, &nfeLS);
+    check_flag(&flag, "ARKodeGetNumRhsEvals", 1, report_error);
     ($vec-ptr:(sunindextype *c_diagnostics))[9] = ncfn;
   } else {
     ($vec-ptr:(sunindextype *c_diagnostics))[7] = 0;
@@ -485,7 +488,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
   /* Clean up and return */
   N_VDestroy(y);            /* Free y vector          */
   N_VDestroy(tv);           /* Free tv vector         */
-  ARKStepFree(&arkode_mem);  /* Free integrator memory */
+  ARKodeFree(&arkode_mem);  /* Free integrator memory */
   SUNLinSolFree(LS);        /* Free linear solver     */
   SUNMatDestroy(A);         /* Free A matrix          */
   SUNContext_Free(&sunctx);
