@@ -579,12 +579,11 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              -- }
         resM <- try $ loop t_start input_ind (fromIntegral output_ind) 0
 
-        (retVal, event_ind) <- case resM of
+        case resM of
           Left (ReturnCode c)
-            | c == fromIntegral CV_SUCCESS -> pure (CV_SUCCESS, -1)
-            | otherwise -> pure $ (fromIntegral c, -1)
-          Right event_ind -> pure (CV_SUCCESS, event_ind)
-        do
+            | c == fromIntegral CV_SUCCESS -> pure CV_SUCCESS
+            | otherwise -> pure $ (fromIntegral c)
+          Right event_ind -> do
             -- finish:
             -- DEBUG("Cleaning up before returning from the hmatrix-sundials solver");
   
