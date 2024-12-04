@@ -11,7 +11,6 @@ module Numeric.Sundials.CVode
   , solveC
   ) where
 
-import qualified Language.C.Inline as C
 import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Storable.Mutable as VSM
 import Foreign.C.Types
@@ -402,7 +401,6 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
   
                --     /* How many events triggered? */
                --     int n_events_triggered = 0;
-               let n_events_triggered = 0
                --     int *c_root_info = ($vec-ptr:(int *c_root_info));
                --     if (root_based_event) {
                --       DEBUG("Handling root-based events");
@@ -419,8 +417,27 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                --         }
                --       }
                --     }
-               when (root_based_event) $ do
-                    error "TODO: root based events"
+               n_events_triggered <- if not root_based_event
+               then pure 0
+               else do
+                 VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
+                   flag <- cCVodeGetRootInfo cvode_mem c_root_info_ptr
+                   when (flag < 0) $ do
+                     error "2829"
+                   let
+                     go i n_events_triggered
+                       | i >= c_n_event_specs = pure n_events_triggered
+                       | otherwise = do
+                         ev <- VSM.read c_root_info (fromIntegral i)
+                         let req_dir = c_requested_event_direction VS.! (fromIntegral i)
+
+                         if ev /= 0 && ev * req_dir >= 0
+                         then do
+                           VSM.write c_root_info n_events_triggered i
+                           go (i + 1) (n_events_triggered + 1)
+                         else do
+                           go (i + 1) n_events_triggered
+                   go 0 0
   
                --     /* Should we stop the solver? */
                --     int stop_solver = 0;
@@ -440,7 +457,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                  then do
                    (stop_solver, record_events, err) <- alloca $ \stop_solver_ptr -> alloca $ \record_event_ptr -> do
                        err <- VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
-                         err <- c_apply_event n_events_triggered c_root_info_ptr t (coerce y) (coerce y) stop_solver_ptr record_event_ptr
+                         err <- c_apply_event (fromIntegral n_events_triggered) c_root_info_ptr t (coerce y) (coerce y) stop_solver_ptr record_event_ptr
                          pure err
                        stop_solver <- peek stop_solver_ptr
                        record_event <- peek record_event_ptr
@@ -733,6 +750,7 @@ foreign import ccall "SUNLinSol_Dense" cSUNLinSol_Dense :: N_Vector -> SUNMatrix
 
 foreign import ccall "CVode" cCVode :: CVodeMem -> CDouble -> N_Vector -> Ptr CDouble -> CInt -> IO CInt
 foreign import ccall "CVodeReInit" cCVodeReInit :: CVodeMem -> CDouble -> N_Vector -> IO ()
+foreign import ccall "CVodeGetRootInfo" cCVodeGetRootInfo :: CVodeMem -> Ptr CInt -> IO CInt
 
 
 -- | Opaque
