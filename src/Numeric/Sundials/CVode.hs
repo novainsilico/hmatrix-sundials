@@ -575,19 +575,19 @@ foreign import ccall "CVodeSetUserData" cCVodeSetUserData :: CVodeMem -> Ptr Use
 
 -- TODO: maybe sundials may directly operate on the haskell vector storable pinned memory area...
 
-foreign import ccall "cCVodeSetMinStep" cCVodeSetMinStep :: CVodeMem -> CDouble -> IO CInt
-foreign import ccall "cCVodeSetMaxNumSteps" cCVodeSetMaxNumSteps :: CVodeMem -> SunIndexType -> IO CInt
-foreign import ccall "cCVodeSetMaxErrTestFails" cCVodeSetMaxErrTestFails :: CVodeMem -> CInt -> IO CInt
-foreign import ccall "cCVodeSVtolerances" cCVodeSVtolerances :: CVodeMem -> CDouble -> N_Vector -> IO CInt
-foreign import ccall "cCVodeRootInit" cCVodeRootInit :: CVodeMem -> CInt -> FunPtr EventConditionCType -> IO CInt
-foreign import ccall "cCVodeSetNoInactiveRootWarn" cCVodeSetNoInactiveRootWarn :: CVodeMem -> IO CInt
-foreign import ccall "cSUNSparseMatrix" cSUNSparseMatrix :: SunIndexType -> SunIndexType -> CInt -> CInt -> SunContext -> IO SUNMatrix
-foreign import ccall "cSUNLinSol_KLU" cSUNLinSol_KLU :: N_Vector -> SUNMatrix -> SunContext -> IO SUNLinearSolver
-foreign import ccall "cSUNDenseMatrix" cSUNDenseMatrix :: SunIndexType -> SunIndexType -> SunContext -> IO SUNMatrix
-foreign import ccall "cSUNLinSol_Dense" cSUNLinSol_Dense :: N_Vector -> SUNMatrix -> SunContext -> IO SUNLinearSolver
-foreign import ccall "cCVodeSetLinearSolver" cCVodeSetLinearSolver :: CVodeMem -> SUNLinearSolver -> SUNMatrix -> IO CInt
-foreign import ccall "cCVodeSetInitStep" cCVodeSetInitStep :: CVodeMem -> CDouble -> IO CInt
-foreign import ccall "cCVode" cCVode :: CVodeMem -> CDouble -> N_Vector -> Ptr CDouble -> CDouble -> IO CInt
+foreign import ccall "CVodeSetMinStep" cCVodeSetMinStep :: CVodeMem -> CDouble -> IO CInt
+foreign import ccall "CVodeSetMaxNumSteps" cCVodeSetMaxNumSteps :: CVodeMem -> SunIndexType -> IO CInt
+foreign import ccall "CVodeSetMaxErrTestFails" cCVodeSetMaxErrTestFails :: CVodeMem -> CInt -> IO CInt
+foreign import ccall "CVodeSVtolerances" cCVodeSVtolerances :: CVodeMem -> CDouble -> N_Vector -> IO CInt
+foreign import ccall "CVodeRootInit" cCVodeRootInit :: CVodeMem -> CInt -> FunPtr EventConditionCType -> IO CInt
+foreign import ccall "CVodeSetNoInactiveRootWarn" cCVodeSetNoInactiveRootWarn :: CVodeMem -> IO CInt
+foreign import ccall "SUNSparseMatrix" cSUNSparseMatrix :: SunIndexType -> SunIndexType -> CInt -> CInt -> SunContext -> IO SUNMatrix
+foreign import ccall "SUNLinSol_KLU" cSUNLinSol_KLU :: N_Vector -> SUNMatrix -> SunContext -> IO SUNLinearSolver
+foreign import ccall "SUNDenseMatrix" cSUNDenseMatrix :: SunIndexType -> SunIndexType -> SunContext -> IO SUNMatrix
+foreign import ccall "SUNLinSol_Dense" cSUNLinSol_Dense :: N_Vector -> SUNMatrix -> SunContext -> IO SUNLinearSolver
+foreign import ccall "CVodeSetLinearSolver" cCVodeSetLinearSolver :: CVodeMem -> SUNLinearSolver -> SUNMatrix -> IO CInt
+foreign import ccall "CVodeSetInitStep" cCVodeSetInitStep :: CVodeMem -> CDouble -> IO CInt
+foreign import ccall "CVode" cCVode :: CVodeMem -> CDouble -> N_Vector -> Ptr CDouble -> CDouble -> IO CInt
 
 -- | Opaque
 newtype SUNMatrix = SunMatrix (Ptr Void)
