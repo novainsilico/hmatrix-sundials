@@ -232,7 +232,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
         --   if (check_flag(&flag, "CVodeSetJacFn", 1, report_error)) return 3124;
         -- }
         when (c_jac_set /= 0) $ do
-          error "we are not using jac"
+          cCVodeSetJacFn cvode_mem c_jac
  
         -- /* Store initial conditions */
         -- ($vec-ptr:(double *c_output_mat))[0 * (c_dim + 1) + 0] = ($vec-ptr:(double *c_sol_time))[0];
@@ -767,6 +767,7 @@ foreign import ccall "SUNLinSol_Dense" cSUNLinSol_Dense :: N_Vector -> SUNMatrix
 foreign import ccall "CVode" cCVode :: CVodeMem -> CDouble -> N_Vector -> Ptr CDouble -> CInt -> IO CInt
 foreign import ccall "CVodeReInit" cCVodeReInit :: CVodeMem -> CDouble -> N_Vector -> IO ()
 foreign import ccall "CVodeGetRootInfo" cCVodeGetRootInfo :: CVodeMem -> Ptr CInt -> IO CInt
+foreign import ccall "CVodeSetJacFn" cCVodeSetJacFn :: CVodeMem -> FunPtr OdeJacobianCType -> IO () 
 
 
 -- | Opaque
