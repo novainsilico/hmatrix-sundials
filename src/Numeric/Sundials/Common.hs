@@ -170,14 +170,14 @@ directionToInt d =
     Downwards -> -1
     AnyDirection -> 0
 
-foreign import ccall "wrapper"
-  mkOdeRhsC :: OdeRhsCType -> IO (FunPtr OdeRhsCType)
+mkOdeRhsC :: OdeRhsCType -> IO (FunPtr OdeRhsCType)
+mkOdeRhsC = error ""
 
-foreign import ccall "wrapper"
-  mkOdeJacobianC :: OdeJacobianCType -> IO (FunPtr OdeJacobianCType)
+mkOdeJacobianC :: OdeJacobianCType -> IO (FunPtr OdeJacobianCType)
+mkOdeJacobianC = error ""
 
-foreign import ccall "wrapper"
-  mkEventConditionsC :: EventConditionCType -> IO (FunPtr EventConditionCType)
+mkEventConditionsC :: EventConditionCType -> IO (FunPtr EventConditionCType)
+mkEventConditionsC = error ""
 
 assembleSolverResult
   :: OdeProblem
