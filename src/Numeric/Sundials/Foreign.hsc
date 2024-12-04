@@ -65,6 +65,7 @@ module Numeric.Sundials.Foreign
   , pattern CV_ROOT_RETURN
   , pattern CV_SUCCESS
   , pattern CV_TOO_CLOSE
+  , getContentPtr, getData
   ) where
 
 import           Foreign

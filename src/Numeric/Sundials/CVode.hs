@@ -238,7 +238,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
           go j
             | j == c_dim = pure ()
             | otherwise = do
-               VSM.write c_output_mat (0 * fromIntegral (c_dim + 1) + (fromIntegral j + 1)) =<< cNV_Ith_S' y j
+               VSM.write c_output_mat (0 * fromIntegral (c_dim + 1) + (fromIntegral j + 1)) =<< cNV_Ith_S' y (fromIntegral j)
                go (j + 1)
         go 0
  
@@ -367,7 +367,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                go j
                  | j == c_dim = pure ()
                  | otherwise = do
-                    VSM.write c_output_mat (output_ind * fromIntegral (c_dim + 1) + (fromIntegral j + 1)) =<< cNV_Ith_S' y j
+                    VSM.write c_output_mat (output_ind * fromIntegral (c_dim + 1) + (fromIntegral j + 1)) =<< cNV_Ith_S' y (fromIntegral j)
                     go (j + 1)
              go 0
  
@@ -616,8 +616,14 @@ newtype N_Vector = N_Vector (Ptr Void)
 
 foreign import ccall "N_VNew_Serial" cN_VNew_serial :: SunIndexType -> SunContext -> IO N_Vector
 
-cNV_Ith_S y i v = error "implement cNV_Ith_S"
-cNV_Ith_S' y i = error "implement cNV_Ith_S'"
+cNV_Ith_S (N_Vector ptr) i v = do
+  qtr <- getContentPtr ptr
+  rtr <- getData qtr
+  pokeElemOff rtr i v
+cNV_Ith_S' (N_Vector ptr) i = do
+  qtr <- getContentPtr ptr
+  rtr <- getData qtr
+  peekElemOff rtr i
 
 foreign import ccall "CVodeSetUserData" cCVodeSetUserData :: CVodeMem -> Ptr UserData -> IO CInt
 
