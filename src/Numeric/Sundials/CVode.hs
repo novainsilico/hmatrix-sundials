@@ -1,5 +1,8 @@
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE PatternSynonyms #-}
 -- | Solution of ordinary differential equation (ODE) initial value problems.
 --
 -- <https://computation.llnl.gov/projects/sundials/sundials-software>
@@ -214,6 +217,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
         -- }
         when (c_init_step_size_set /= 0) $ do
           cCVodeSetInitStep cvode_mem c_init_step_size
+          pure ()
   
         -- /* Set the Jacobian if there is one */
         -- if ($(int c_jac_set)) {
@@ -278,7 +282,11 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              let next_stop_time = min ti next_time_event
              --   DEBUG("Main loop iteration: t = %.17g (%a), next time point (ti) = %.17g, next time event = %.17g", t, ti, next_time_event);
              --   flag = CVode(cvode_mem, next_stop_time, y, &t, CV_NORMAL); /* call integrator */
-             flag <- cCVode cvode_mem next_stop_time y t_ptr CV_NORMAL
+             (t, flag) <- alloca $ \t_ptr -> do
+               flag <- cCVode cvode_mem next_stop_time y t_ptr CV_NORMAL
+               t <- peek t_ptr
+               pure (t, flag)
+
              --   DEBUG("CVode returned %d; now t = %.17g\n", flag, t);
              --   int root_based_event = flag == CV_ROOT_RETURN;
              let root_based_event = flag == CV_ROOT_RETURN
@@ -430,6 +438,8 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --   t_start = t;
              -- }
         loop input_ind output_ind
+        pure CV_SUCCESS
+
 
         -- TODO: finish the diagnostics
   
@@ -564,3 +574,23 @@ foreign import ccall "CVodeSetUserData" cCVodeSetUserData :: CVodeMem -> Ptr Use
 
 
 -- TODO: maybe sundials may directly operate on the haskell vector storable pinned memory area...
+
+foreign import ccall "cCVodeSetMinStep" cCVodeSetMinStep :: CVodeMem -> CDouble -> IO CInt
+foreign import ccall "cCVodeSetMaxNumSteps" cCVodeSetMaxNumSteps :: CVodeMem -> SunIndexType -> IO CInt
+foreign import ccall "cCVodeSetMaxErrTestFails" cCVodeSetMaxErrTestFails :: CVodeMem -> CInt -> IO CInt
+foreign import ccall "cCVodeSVtolerances" cCVodeSVtolerances :: CVodeMem -> CDouble -> N_Vector -> IO CInt
+foreign import ccall "cCVodeRootInit" cCVodeRootInit :: CVodeMem -> CInt -> FunPtr EventConditionCType -> IO CInt
+foreign import ccall "cCVodeSetNoInactiveRootWarn" cCVodeSetNoInactiveRootWarn :: CVodeMem -> IO CInt
+foreign import ccall "cSUNSparseMatrix" cSUNSparseMatrix :: SunIndexType -> SunIndexType -> CInt -> CInt -> SunContext -> IO SUNMatrix
+foreign import ccall "cSUNLinSol_KLU" cSUNLinSol_KLU :: N_Vector -> SUNMatrix -> SunContext -> IO SUNLinearSolver
+foreign import ccall "cSUNDenseMatrix" cSUNDenseMatrix :: SunIndexType -> SunIndexType -> SunContext -> IO SUNMatrix
+foreign import ccall "cSUNLinSol_Dense" cSUNLinSol_Dense :: N_Vector -> SUNMatrix -> SunContext -> IO SUNLinearSolver
+foreign import ccall "cCVodeSetLinearSolver" cCVodeSetLinearSolver :: CVodeMem -> SUNLinearSolver -> SUNMatrix -> IO CInt
+foreign import ccall "cCVodeSetInitStep" cCVodeSetInitStep :: CVodeMem -> CDouble -> IO CInt
+foreign import ccall "cCVode" cCVode :: CVodeMem -> CDouble -> N_Vector -> Ptr CDouble -> CDouble -> IO CInt
+
+-- | Opaque
+newtype SUNMatrix = SunMatrix (Ptr Void)
+  deriving newtype Storable
+newtype SUNLinearSolver = SUNLinearSolver (Ptr Void)
+  deriving newtype Storable
