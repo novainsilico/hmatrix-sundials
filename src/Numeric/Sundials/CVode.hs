@@ -227,18 +227,26 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
         -- }
         when (c_jac_set /= 0) $ do
           error "we are not using jac"
-  
+ 
         -- /* Store initial conditions */
         -- ($vec-ptr:(double *c_output_mat))[0 * (c_dim + 1) + 0] = ($vec-ptr:(double *c_sol_time))[0];
         -- for (j = 0; j < c_dim; j++) {
         --   ($vec-ptr:(double *c_output_mat))[0 * (c_dim + 1) + (j + 1)] = NV_Ith_S(y,j);
         -- }
+        VSM.write c_output_mat (0 * (fromIntegral c_dim + 1) + 0) (c_sol_time VS.! 0)
+        let
+          go j
+            | j == c_dim = pure ()
+            | otherwise = do
+               VSM.write c_output_mat (0 * fromIntegral (c_dim + 1) + (fromIntegral j + 1)) =<< cNV_Ith_S' y j
+               go (j + 1)
+        go 0
  
         c_ontimepoint output_ind
         -- $fun:(void (*c_ontimepoint)(int))(output_ind);
   
         let
-          loop input_ind output_ind = do
+          loop t_start input_ind output_ind = do
              -- while (1) {
              --    // The solver will run until it terminates or receive a signal to stop by the
              --    // way of a non null value in *ptrSTop
@@ -290,18 +298,23 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --   DEBUG("CVode returned %d; now t = %.17g\n", flag, t);
              --   int root_based_event = flag == CV_ROOT_RETURN;
              let root_based_event = flag == CV_ROOT_RETURN
-             let time_based_event = t == next_time_event
-             print ("one step of solver was done", flag)
              --   int time_based_event = t == next_time_event;
+             let time_based_event = t == next_time_event
              --   if (flag == CV_TOO_CLOSE && !time_based_event) {
+             (t, flag) <- if flag == CV_TOO_CLOSE && not time_based_event
+             then do
              --     /* See Note [CV_TOO_CLOSE]
              --        No solving was required; just set the time t manually and continue
              --        as if solving succeeded. */
              --     DEBUG("Got CV_TOO_CLOSE; no solving was required; proceeding to t = %.17g", next_stop_time);
              --     t = next_stop_time;
+               pure (next_stop_time, flag)
              --   }
              --   else
+             else do
              --   if (t == next_stop_time && t == t_start && flag == CV_ROOT_RETURN && !time_based_event) {
+               if t == next_stop_time && t == t_start && flag == CV_ROOT_RETURN && not time_based_event
+               then do
              --     /* See Note [CV_TOO_CLOSE]
              --        Probably the initial step size was set, and that's why we didn't
              --        get CV_TOO_CLOSE.
@@ -309,10 +322,16 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --        forever. */
              --     DEBUG("Got a root but t == t_start == next_stop_time; pretending it didn't happen");
              --     flag = CV_SUCCESS;
+                 pure (t, CV_SUCCESS)
              --   }
              --   else
+               else do
              --   if (!(flag == CV_TOO_CLOSE && time_based_event) &&
              --     check_flag(&flag, "CVode", 1, report_error)) {
+
+                 if not (flag == CV_TOO_CLOSE && time_based_event)
+                 then
+                   -- TODO:  report an error
   
              --     N_Vector ele = N_VNew_Serial(c_dim, sunctx);
              --     N_Vector weights = N_VNew_Serial(c_dim, sunctx);
@@ -331,20 +350,42 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --     N_VDestroy(ele);
              --     N_VDestroy(weights);
              --     return 45;
+                  -- TODO: this is weird, that's an early exit... Better raising for now
+                  error "surplining early exit"
+                  else
+                    pure (t, flag)
              --   }
-  
+             
+             
              --   /* Store the results for Haskell */
              --   ($vec-ptr:(double *c_output_mat))[output_ind * (c_dim + 1) + 0] = t;
              --   for (j = 0; j < c_dim; j++) {
              --     ($vec-ptr:(double *c_output_mat))[output_ind * (c_dim + 1) + (j + 1)] = NV_Ith_S(y,j);
              --   }
+             VSM.write c_output_mat (output_ind * (fromIntegral c_dim + 1) + 0) t
+             let
+               go j
+                 | j == c_dim = pure ()
+                 | otherwise = do
+                    VSM.write c_output_mat (output_ind * fromIntegral (c_dim + 1) + (fromIntegral j + 1)) =<< cNV_Ith_S' y j
+                    go (j + 1)
+             go 0
+ 
   
              --   $fun:(void (*c_ontimepoint)(int))(output_ind);
-  
+             c_ontimepoint (fromIntegral output_ind)
+
              --   output_ind++;
+             --   WARNING: I'm doing something super UGLY here
+             output_ind <- pure (output_ind + 1)
+
              --   ($vec-ptr:(int *c_n_rows))[0] = output_ind;
-  
+             VSM.write  c_n_rows 0 (fromIntegral output_ind)
+             pure 1
+ 
              --   if (root_based_event || time_based_event) {
+             when (root_based_event || time_based_event) $ do
+               error "Got an event, let's handle that later"
              --     DEBUG("Got an event");
              --     if (event_ind >= $(int c_max_events)) {
              --       /* We reached the maximum number of events.
@@ -431,13 +472,23 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --       if (check_flag(&flag, "CVodeReInit", 1, report_error)) return(1576);
              --     }
              --   }
+             --
+             if t == ti
+             then
+               if input_ind + 1 > fromIntegral c_n_sol_times
+               then
+                 pure ()
+               else
+                 loop t (input_ind + 1) output_ind
+             else
+               loop t input_ind output_ind
              --   if (t == ti) {
              --     if (++input_ind >= $(int c_n_sol_times))
              --       goto finish;
              --   }
              --   t_start = t;
              -- }
-        loop input_ind output_ind
+        loop t_start input_ind (fromIntegral output_ind)
         pure CV_SUCCESS
 
 
@@ -566,6 +617,7 @@ newtype N_Vector = N_Vector (Ptr Void)
 foreign import ccall "N_VNew_Serial" cN_VNew_serial :: SunIndexType -> SunContext -> IO N_Vector
 
 cNV_Ith_S y i v = error "implement cNV_Ith_S"
+cNV_Ith_S' y i = error "implement cNV_Ith_S'"
 
 foreign import ccall "CVodeSetUserData" cCVodeSetUserData :: CVodeMem -> Ptr UserData -> IO CInt
 

@@ -64,6 +64,7 @@ module Numeric.Sundials.Foreign
   , pattern CV_NORMAL
   , pattern CV_ROOT_RETURN
   , pattern CV_SUCCESS
+  , pattern CV_TOO_CLOSE
   ) where
 
 import           Foreign
@@ -359,3 +360,4 @@ pattern CSC_MAT = #const CSC_MAT
 pattern CV_NORMAL = #const CV_NORMAL
 pattern CV_SUCCESS = #const CV_SUCCESS
 pattern CV_ROOT_RETURN = #const CV_ROOT_RETURN
+pattern CV_TOO_CLOSE = #const CV_TOO_CLOSE
