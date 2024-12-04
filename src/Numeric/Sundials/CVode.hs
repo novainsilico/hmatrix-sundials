@@ -49,7 +49,6 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
     report_error_new_api = wrapErrorNewApi (reportErrorWithKatip log_env)
     debug = debugMsgWithKatip log_env
   in do
-
   -- [C.block| int {
   -- /* general problem variables */
 
@@ -537,7 +536,9 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                   --       }
                   --     }
                   stop_solver <- if (event_ind >= c_max_events)
-                  then pure 1
+                  then do
+                    VSM.write c_diagnostics 10 1
+                    pure 1
                   else pure stop_solver
                   --     if (event_ind >= $(int c_max_events)) {
                   --       DEBUG("Reached max_events; returning");
