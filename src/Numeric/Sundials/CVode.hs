@@ -26,6 +26,8 @@ import Foreign
 import Control.Exception
 import Control.Monad (when)
 import Data.Void
+import Foreign.C
+import Data.Maybe (fromMaybe)
 
 -- | Available methods for CVode
 data CVMethod = ADAMS
@@ -84,7 +86,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
       -- /* general problem parameters */
   
       -- realtype T0 = RCONST(($vec-ptr:(double *c_sol_time))[0]); /* initial time              */
-      let t0 = c_sol_time VS.! 0
+      let t0 = fromMaybe (error "t0") $ c_sol_time VS.!? 0
       -- sunindextype c_dim = $(sunindextype c_dim);           /* number of dependent vars. */
   
       -- /* t_start tracks the starting point of the integration in order to detect
@@ -246,7 +248,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
         -- $fun:(void (*c_ontimepoint)(int))(output_ind);
   
         let
-          loop t_start input_ind output_ind = do
+          loop t_start input_ind output_ind event_ind = do
              -- while (1) {
              --    // The solver will run until it terminates or receive a signal to stop by the
              --    // way of a non null value in *ptrSTop
@@ -264,7 +266,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --   }
              --   TODO: remove the stop code, this is NOT required anymore, the exception will pop HERE
              --   double ti = ($vec-ptr:(double *c_sol_time))[input_ind];
-             let ti = c_sol_time VS.! input_ind
+             let ti = fromMaybe (error "titi") $ c_sol_time VS.!? input_ind
 
              --   double next_time_event = ($fun:(double (*c_next_time_event)()))();
              next_time_event <- c_next_time_event
@@ -329,7 +331,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --   if (!(flag == CV_TOO_CLOSE && time_based_event) &&
              --     check_flag(&flag, "CVode", 1, report_error)) {
 
-                 if not (flag == CV_TOO_CLOSE && time_based_event)
+                 if not (flag == CV_TOO_CLOSE && time_based_event) && flag < 0
                  then
                    -- TODO:  report an error
   
@@ -351,7 +353,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --     N_VDestroy(weights);
              --     return 45;
                   -- TODO: this is weird, that's an early exit... Better raising for now
-                  error "surplining early exit"
+                    error "surplining early exit"
                   else
                     pure (t, flag)
              --   }
@@ -385,7 +387,6 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
  
              --   if (root_based_event || time_based_event) {
              when (root_based_event || time_based_event) $ do
-               error "Got an event, let's handle that later"
              --     DEBUG("Got an event");
              --     if (event_ind >= $(int c_max_events)) {
              --       /* We reached the maximum number of events.
@@ -395,61 +396,90 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --       DEBUG("Maximum number of events reached");
              --       return 8630;
              --     }
+               when (event_ind >= c_max_events) $ do
+                 error "Maximum number of events reached"
+            
   
              --     /* How many events triggered? */
              --     int n_events_triggered = 0;
-             --     int *c_root_info = ($vec-ptr:(int *c_root_info));
-             --     if (root_based_event) {
-             --       DEBUG("Handling root-based events");
-             --       flag = CVodeGetRootInfo(cvode_mem, c_root_info);
-             --       if (check_flag(&flag, "CVodeGetRootInfo", 1, report_error)) return 2829;
-             --       for (i = 0; i < $(int c_n_event_specs); i++) {
-             --         int ev = c_root_info[i];
-             --         int req_dir = ($vec-ptr:(const int *c_requested_event_direction))[i];
-             --         if (ev != 0 && ev * req_dir >= 0) {
-             --           /* After the above call to CVodeGetRootInfo, c_root_info has an
-             --           entry per EventSpec. Here we reuse the same array but convert it
-             --           into one that contains indices of triggered events. */
-             --           c_root_info[n_events_triggered++] = i;
-             --         }
-             --       }
-             --     }
+               let n_events_triggered = 0
+               --     int *c_root_info = ($vec-ptr:(int *c_root_info));
+               --     if (root_based_event) {
+               --       DEBUG("Handling root-based events");
+               --       flag = CVodeGetRootInfo(cvode_mem, c_root_info);
+               --       if (check_flag(&flag, "CVodeGetRootInfo", 1, report_error)) return 2829;
+               --       for (i = 0; i < $(int c_n_event_specs); i++) {
+               --         int ev = c_root_info[i];
+               --         int req_dir = ($vec-ptr:(const int *c_requested_event_direction))[i];
+               --         if (ev != 0 && ev * req_dir >= 0) {
+               --           /* After the above call to CVodeGetRootInfo, c_root_info has an
+               --           entry per EventSpec. Here we reuse the same array but convert it
+               --           into one that contains indices of triggered events. */
+               --           c_root_info[n_events_triggered++] = i;
+               --         }
+               --       }
+               --     }
+               when (root_based_event) $ do
+                    error "TODO: root based events"
   
-             --     /* Should we stop the solver? */
-             --     int stop_solver = 0;
-             --     /* Should we record the state before/after the event in the output matrix? */
-             --     int record_events = 0;
-             --     if (n_events_triggered > 0 || time_based_event) {
-             --       /* Update the state with the supplied function */
-             --       DEBUG("Calling the event handler; n_events_triggered = %d; time_based_event = %d", n_events_triggered, time_based_event);
-             --       int error = $fun:(int (* c_apply_event) (int, int*, double, N_Vector y, N_Vector z, int*, int*))(n_events_triggered, c_root_info, t, y, y, &stop_solver, &record_events);
+               --     /* Should we stop the solver? */
+               --     int stop_solver = 0;
+               --     /* Should we record the state before/after the event in the output matrix? */
+               --     int record_events = 0;
+               --     if (n_events_triggered > 0 || time_based_event) {
+               --       /* Update the state with the supplied function */
+               --       DEBUG("Calling the event handler; n_events_triggered = %d; time_based_event = %d", n_events_triggered, time_based_event);
+               --       int error = $fun:(int (* c_apply_event) (int, int*, double, N_Vector y, N_Vector z, int*, int*))(n_events_triggered, c_root_info, t, y, y, &stop_solver, &record_events);
   
-             --       // If the event handled failed internally, we stop the solving
-             --       if(error)
-             --         break;
-             --     }
+               --       // If the event handled failed internally, we stop the solving
+               --       if(error)
+               --         break;
+               --     }
+               (record_events, stop_solver) <-
+                 if (n_events_triggered > 0 || time_based_event)
+                 then do
+                   (stop_solver, record_events, err) <- alloca $ \stop_solver_ptr -> alloca $ \record_event_ptr -> do
+                       err <- VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
+                         err <- c_apply_event n_events_triggered c_root_info_ptr t (coerce y) (coerce y) stop_solver_ptr record_event_ptr
+                         pure err
+                       stop_solver <- peek stop_solver_ptr
+                       record_event <- peek record_event_ptr
+                       pure (stop_solver, record_event, err)
+
+                   when (err /= 0) $ do
+                     error "Event handler failed internally"
+
+                   pure (record_events, stop_solver)
+                 else
+                   pure (0, 0)
   
-             --     if (record_events) {
-             --       DEBUG("Recording events");
-             --       /* A corner case: if the time-based event triggers at the very beginning,
-             --          then we don't want to duplicate the initial row, so rewind it back.
-             --          Note that we do this only in the branch where record_events is true;
-             --          otherwise we may end up erasing the initial row (see below). */
-             --       if (t == ($vec-ptr:(double *c_sol_time))[0] && output_ind == 2) {
-             --         output_ind--;
-             --         /* c_n_rows will be updated below anyway */
-             --       }
+               --     if (record_events) {
+               if record_events /= 0
+               then do
+                 error "TODO: record events"
+                 --       DEBUG("Recording events");
+                 --       /* A corner case: if the time-based event triggers at the very beginning,
+                 --          then we don't want to duplicate the initial row, so rewind it back.
+                 --          Note that we do this only in the branch where record_events is true;
+                 --          otherwise we may end up erasing the initial row (see below). */
+                 --       if (t == ($vec-ptr:(double *c_sol_time))[0] && output_ind == 2) {
+                 --         output_ind--;
+                 --         /* c_n_rows will be updated below anyway */
+                 --       }
   
-             --       ($vec-ptr:(double *c_output_mat))[output_ind * (c_dim + 1) + 0] = t;
-             --       for (j = 0; j < c_dim; j++) {
-             --         ($vec-ptr:(double *c_output_mat))[output_ind * (c_dim + 1) + (j + 1)] = NV_Ith_S(y,j);
-             --       }
-             --       $fun:(void (*c_ontimepoint)(int))(output_ind);
+                 --       ($vec-ptr:(double *c_output_mat))[output_ind * (c_dim + 1) + 0] = t;
+                 --       for (j = 0; j < c_dim; j++) {
+                 --         ($vec-ptr:(double *c_output_mat))[output_ind * (c_dim + 1) + (j + 1)] = NV_Ith_S(y,j);
+                 --       }
+                 --       $fun:(void (*c_ontimepoint)(int))(output_ind);
   
-             --       event_ind++;
-             --       output_ind++;
-             --       ($vec-ptr:(int *c_n_rows))[0] = output_ind;
-             --     } else {
+                 --       event_ind++;
+                 --       output_ind++;
+                 --       ($vec-ptr:(int *c_n_rows))[0] = output_ind;
+                 --     } else {
+               else do
+                  error "TODO: not record events"
+
              --       /* Remove the saved row — unless the event time also coincides with a requested time point */
              --       if (t != ti) {
              --         output_ind--;
@@ -473,22 +503,24 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --     }
              --   }
              --
+
+
              if t == ti
              then
-               if input_ind + 1 > fromIntegral c_n_sol_times
+               if input_ind + 1 >= fromIntegral c_n_sol_times
                then
                  pure ()
                else
-                 loop t (input_ind + 1) output_ind
+                 loop t (input_ind + 1) output_ind event_ind
              else
-               loop t input_ind output_ind
+               loop t input_ind output_ind event_ind
              --   if (t == ti) {
              --     if (++input_ind >= $(int c_n_sol_times))
              --       goto finish;
              --   }
              --   t_start = t;
              -- }
-        loop t_start input_ind (fromIntegral output_ind)
+        loop t_start input_ind (fromIntegral output_ind) 0
         pure CV_SUCCESS
 
 
@@ -588,10 +620,21 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
 newtype SunContext = SunContext (Ptr Void)
   deriving newtype Storable
 
+foreign import ccall "SUNGetErrMsg" cSUNGetErrMsg :: CInt -> IO CString
+
 withSunContext :: (SunContext -> IO a) -> IO a
 withSunContext cont = do
   alloca $ \ptr -> do
-    bracket_(cSUNContext_Create 0 ptr) (cSUNContext_Free ptr) $ do
+    let
+      create = do
+        errCode <- cSUNContext_Create 0 ptr
+        when (errCode /= 0) $ do
+          errMsg <- cSUNGetErrMsg errCode
+          msg <- peekCString errMsg
+          error msg
+        pure ()
+      destroy = cSUNContext_Free ptr
+    bracket_ create destroy  $ do
       sunctx <- peek ptr
       cont sunctx
 
@@ -604,11 +647,23 @@ newtype CVodeMem = CVodeMem (Ptr Void)
 
 withCVodeMem :: CInt -> SunContext -> (CVodeMem -> IO a) -> IO a
 withCVodeMem method suncontext f = do
-    bracket (cCVodeCreate method suncontext) (\x -> print "freeeee, I'm free") f
+    let
+      create = do
+        res@(CVodeMem ptr) <- cCVodeCreate method suncontext
+        if ptr == nullPtr
+        then
+          error "null ptr when creating cvmem"
+        else
+          pure res
+      destroy p = do
+        alloca $ \ptrPtr -> do
+          poke ptrPtr p
+          cCVodeFree ptrPtr
+    bracket create destroy f
 
 foreign import ccall "CVodeCreate" cCVodeCreate :: CInt -> SunContext -> IO CVodeMem
 -- TODO: check 
-foreign import ccall "CVodeFree" cCVodeFree :: CVodeMem -> IO ()
+foreign import ccall "CVodeFree" cCVodeFree :: Ptr CVodeMem -> IO ()
 foreign import ccall "CVodeInit" cCVodeInit :: CVodeMem -> FunPtr OdeRhsCType -> SunRealType -> N_Vector -> IO CInt
 
 -- | An opaque pointer to an N_Vector
@@ -639,13 +694,15 @@ foreign import ccall "CVodeSetMaxErrTestFails" cCVodeSetMaxErrTestFails :: CVode
 foreign import ccall "CVodeSVtolerances" cCVodeSVtolerances :: CVodeMem -> CDouble -> N_Vector -> IO CInt
 foreign import ccall "CVodeRootInit" cCVodeRootInit :: CVodeMem -> CInt -> FunPtr EventConditionCType -> IO CInt
 foreign import ccall "CVodeSetNoInactiveRootWarn" cCVodeSetNoInactiveRootWarn :: CVodeMem -> IO CInt
+foreign import ccall "CVodeSetLinearSolver" cCVodeSetLinearSolver :: CVodeMem -> SUNLinearSolver -> SUNMatrix -> IO CInt
+foreign import ccall "CVodeSetInitStep" cCVodeSetInitStep :: CVodeMem -> CDouble -> IO CInt
+
 foreign import ccall "SUNSparseMatrix" cSUNSparseMatrix :: SunIndexType -> SunIndexType -> CInt -> CInt -> SunContext -> IO SUNMatrix
 foreign import ccall "SUNLinSol_KLU" cSUNLinSol_KLU :: N_Vector -> SUNMatrix -> SunContext -> IO SUNLinearSolver
 foreign import ccall "SUNDenseMatrix" cSUNDenseMatrix :: SunIndexType -> SunIndexType -> SunContext -> IO SUNMatrix
 foreign import ccall "SUNLinSol_Dense" cSUNLinSol_Dense :: N_Vector -> SUNMatrix -> SunContext -> IO SUNLinearSolver
-foreign import ccall "CVodeSetLinearSolver" cCVodeSetLinearSolver :: CVodeMem -> SUNLinearSolver -> SUNMatrix -> IO CInt
-foreign import ccall "CVodeSetInitStep" cCVodeSetInitStep :: CVodeMem -> CDouble -> IO CInt
-foreign import ccall "CVode" cCVode :: CVodeMem -> CDouble -> N_Vector -> Ptr CDouble -> CDouble -> IO CInt
+
+foreign import ccall "CVode" cCVode :: CVodeMem -> CDouble -> N_Vector -> Ptr CDouble -> CInt -> IO CInt
 
 -- | Opaque
 newtype SUNMatrix = SunMatrix (Ptr Void)
