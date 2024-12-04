@@ -604,7 +604,7 @@ newtype CVodeMem = CVodeMem (Ptr Void)
 
 withCVodeMem :: CInt -> SunContext -> (CVodeMem -> IO a) -> IO a
 withCVodeMem method suncontext f = do
-    bracket (cCVodeCreate method suncontext) cCVodeFree f
+    bracket (cCVodeCreate method suncontext) (\x -> print "freeeee, I'm free") f
 
 foreign import ccall "CVodeCreate" cCVodeCreate :: CInt -> SunContext -> IO CVodeMem
 -- TODO: check 
