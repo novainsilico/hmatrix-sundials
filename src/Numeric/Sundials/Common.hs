@@ -17,13 +17,9 @@ import Data.Aeson
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.ByteString as BS
-import qualified Data.Map.Strict as Map
 import Control.Monad.Reader
 import GHC.Generics (Generic)
 import Foreign.ForeignPtr
-import Language.C.Types as CT
-import Language.C.Inline.Context
-import qualified Language.Haskell.TH as TH
 
 -- | A collection of variables that we allocate on the Haskell side and
 -- pass into the C code to be filled.
@@ -307,9 +303,8 @@ reportErrorWithKatip log_env err_code c_mod_name c_func_name c_msg _userdata = d
   flip runReaderT log_env . unKatipT $ do
     logF errCtx "sundials" severity (logStr msg)
 
-debugMsgWithKatip :: LogEnv -> CString -> IO ()
-debugMsgWithKatip log_env cstr = do
-  text <- cstringToText cstr
+debugMsgWithKatip :: LogEnv -> String -> IO ()
+debugMsgWithKatip log_env text = do
   flip runReaderT log_env . unKatipT $ do
     logF () "hmatrix-sundials" DebugS (logStr text)
 
@@ -535,16 +530,20 @@ data CrossingDirection = Upwards | Downwards | AnyDirection
 -- If there is no next time-based event, the action should return +Inf.
 newtype TimeEventSpec = TimeEventSpec (IO Double)
 
-sunTypesTable :: Map.Map TypeSpecifier TH.TypeQ
-sunTypesTable = Map.fromList
-  [
-    (TypeName "sunindextype", [t| SunIndexType |] )
-  , (TypeName "realtype",     [t| SunRealType |] )
-  , (TypeName "N_Vector",     [t| Ptr SunVector |] )
-  , (TypeName "SUNMatrix",    [t| Ptr SunMatrix |] )
-  , (TypeName "UserData",     [t| UserData |] )
-  ]
+{-
+  After the inline-c refactoring, there are many todos / things which can be improved:
 
--- | Allows to map between Haskell and C types
-sunCtx :: Context
-sunCtx = mempty {ctxTypesTable = sunTypesTable}
+- We have a few function (event handling, conditions, next time step, ...,
+  which are wrapped to C and that's not necessary anymore.
+- The early exit / ptrStop logic is not required anymore
+- Debuging can be moved to full katip with finer grained control
+- All the c_n_rows logic, output_ind, input_ind, event_ind logic can just be
+  removed and we could work on a stream / list of output elements.
+- The diagnostics could directly be generated in the relevant struct, instead
+  of being pushed in an opaque vector.
+- A lot of "int" can be turned into "Bool"
+- A few vector copy which are implemneted with loop may benefit from `memcpy`
+- Many many pieces of the solving loop can be shared between the different
+- solver, which will help us introducing new solver (such as IDA).
+-}
+
