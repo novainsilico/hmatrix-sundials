@@ -82,6 +82,8 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
       --    more convenient to use in index calculations.
       -- */
       -- ($vec-ptr:(int *c_n_rows))[0] = output_ind;
+      --
+      VSM.write  c_n_rows 0 (fromIntegral output_ind)
       -- /* event_ind tracks the current event number */
       -- int event_ind = 0;
   
