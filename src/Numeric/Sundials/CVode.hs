@@ -566,7 +566,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              then
                if input_ind + 1 >= fromIntegral c_n_sol_times
                then
-                 pure ()
+                 pure event_ind
                else
                  loop t (input_ind + 1) output_ind event_ind
              else
@@ -579,69 +579,113 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              -- }
         resM <- try $ loop t_start input_ind (fromIntegral output_ind) 0
 
-        case resM of
-          Right () -> pure CV_SUCCESS
+        (retVal, event_ind) <- case resM of
           Left (ReturnCode c)
-            | c == fromIntegral CV_SUCCESS -> pure CV_SUCCESS
-            | otherwise -> pure $ fromIntegral c
+            | c == fromIntegral CV_SUCCESS -> pure (CV_SUCCESS, -1)
+            | otherwise -> pure $ (fromIntegral c, -1)
+          Right event_ind -> pure (CV_SUCCESS, event_ind)
+        do
+            -- finish:
+            -- DEBUG("Cleaning up before returning from the hmatrix-sundials solver");
+  
+            -- /* The number of actual roots we found */
+            -- ($vec-ptr:(int *c_n_events))[0] = event_ind;
+            VSM.write c_n_events 0 event_ind
+  
+            -- /* Get some final statistics on how the solve progressed */
+            -- flag = CVodeGetNumSteps(cvode_mem, &nst);
+            -- check_flag(&flag, "CVodeGetNumSteps", 1, report_error);
+            -- ($vec-ptr:(sunindextype *c_diagnostics))[0] = nst;
+            --
+            alloca $ \ptr -> do
+              cCVodeGetNumSteps cvode_mem ptr
+              val <- peek ptr
+              VSM.write c_diagnostics 0 val
+  
+            -- /* FIXME */
+            -- ($vec-ptr:(sunindextype *c_diagnostics))[1] = 0;
+            VSM.write c_diagnostics 1 0
+  
+            -- flag = CVodeGetNumRhsEvals(cvode_mem, &nfe);
+            -- check_flag(&flag, "CVodeGetNumRhsEvals", 1, report_error);
+            -- ($vec-ptr:(sunindextype *c_diagnostics))[2] = nfe;
+            
+            alloca $ \ptr -> do
+              cCVodeGetNumRhsEvals cvode_mem ptr
+              val <- peek ptr
+              VSM.write c_diagnostics 2 val
+            
+            -- /* FIXME */
+            -- ($vec-ptr:(sunindextype *c_diagnostics))[3] = 0;
+  
+            VSM.write c_diagnostics 3 0
 
+            -- flag = CVodeGetNumLinSolvSetups(cvode_mem, &nsetups);
+            -- check_flag(&flag, "CVodeGetNumLinSolvSetups", 1, report_error);
+            -- ($vec-ptr:(sunindextype *c_diagnostics))[4] = nsetups;
+ 
+            alloca $ \ptr -> do
+              cCVodeGetNumLinSolvSetups cvode_mem ptr
+              val <- peek ptr
+              VSM.write c_diagnostics 4 val
 
-        -- TODO: finish the diagnostics
+            -- flag = CVodeGetNumErrTestFails(cvode_mem, &netf);
+            -- check_flag(&flag, "CVodeGetNumErrTestFails", 1, report_error);
+            -- ($vec-ptr:(sunindextype *c_diagnostics))[5] = netf;
+            
+            alloca $ \ptr -> do
+              cCVodeGetNumErrTestFails cvode_mem ptr
+              val <- peek ptr
+              VSM.write c_diagnostics 5 val
   
-        -- finish:
-        -- DEBUG("Cleaning up before returning from the hmatrix-sundials solver");
+            -- flag = CVodeGetNumNonlinSolvIters(cvode_mem, &nni);
+            -- check_flag(&flag, "CVodeGetNumNonlinSolvIters", 1, report_error);
+            -- ($vec-ptr:(sunindextype *c_diagnostics))[6] = nni;
+
+            alloca $ \ptr -> do
+              cCVodeGetNumNonlinSolvIters cvode_mem ptr
+              val <- peek ptr
+              VSM.write c_diagnostics 6 val
   
-        -- /* The number of actual roots we found */
-        -- ($vec-ptr:(int *c_n_events))[0] = event_ind;
+            -- flag = CVodeGetNumNonlinSolvConvFails(cvode_mem, &ncfn);
+            -- check_flag(&flag, "CVodeGetNumNonlinSolvConvFails", 1, report_error);
+            -- ($vec-ptr:(sunindextype *c_diagnostics))[7] = ncfn;
   
-        -- /* Get some final statistics on how the solve progressed */
-        -- flag = CVodeGetNumSteps(cvode_mem, &nst);
-        -- check_flag(&flag, "CVodeGetNumSteps", 1, report_error);
-        -- ($vec-ptr:(sunindextype *c_diagnostics))[0] = nst;
+
+            alloca $ \ptr -> do
+              cCVodeGetNumNonlinSolvConvFails cvode_mem ptr
+              val <- peek ptr
+              VSM.write c_diagnostics 7 val
+
+            -- flag = CVodeGetNumJacEvals(cvode_mem, &nje);
+            -- check_flag(&flag, "CVodeGetNumJacEvals", 1, report_error);
+            -- ($vec-ptr:(sunindextype *c_diagnostics))[8] = nje;
+ 
+            alloca $ \ptr -> do
+              cCVodeGetNumJacEvals cvode_mem ptr
+              val <- peek ptr
+              VSM.write c_diagnostics 8 val
+
+            -- flag = CVodeGetNumLinRhsEvals(cvode_mem, &nfeLS);
+            -- check_flag(&flag, "CVodeGetNumLinRhsEvals", 1, report_error);
+            -- ($vec-ptr:(sunindextype *c_diagnostics))[9] = nfeLS;
+ 
+            alloca $ \ptr -> do
+              cCVodeGetNumLinRhsEvals cvode_mem ptr
+              val <- peek ptr
+              VSM.write c_diagnostics 9 val
+
+            -- TODO: most of these should be handled by bracket style
+            -- /* Clean up and return */
+            -- N_VDestroy(y);          /* Free y vector          */
+            -- N_VDestroy(tv);         /* Free tv vector         */
+            -- CVodeFree(&cvode_mem);  /* Free integrator memory */
+            -- SUNLinSolFree(LS);      /* Free linear solver     */
+            -- SUNMatDestroy(A);       /* Free A matrix          */
+            -- SUNContext_Free(&sunctx);
   
-        -- /* FIXME */
-        -- ($vec-ptr:(sunindextype *c_diagnostics))[1] = 0;
-  
-        -- flag = CVodeGetNumRhsEvals(cvode_mem, &nfe);
-        -- check_flag(&flag, "CVodeGetNumRhsEvals", 1, report_error);
-        -- ($vec-ptr:(sunindextype *c_diagnostics))[2] = nfe;
-        -- /* FIXME */
-        -- ($vec-ptr:(sunindextype *c_diagnostics))[3] = 0;
-  
-        -- flag = CVodeGetNumLinSolvSetups(cvode_mem, &nsetups);
-        -- check_flag(&flag, "CVodeGetNumLinSolvSetups", 1, report_error);
-        -- ($vec-ptr:(sunindextype *c_diagnostics))[4] = nsetups;
-  
-        -- flag = CVodeGetNumErrTestFails(cvode_mem, &netf);
-        -- check_flag(&flag, "CVodeGetNumErrTestFails", 1, report_error);
-        -- ($vec-ptr:(sunindextype *c_diagnostics))[5] = netf;
-  
-        -- flag = CVodeGetNumNonlinSolvIters(cvode_mem, &nni);
-        -- check_flag(&flag, "CVodeGetNumNonlinSolvIters", 1, report_error);
-        -- ($vec-ptr:(sunindextype *c_diagnostics))[6] = nni;
-  
-        -- flag = CVodeGetNumNonlinSolvConvFails(cvode_mem, &ncfn);
-        -- check_flag(&flag, "CVodeGetNumNonlinSolvConvFails", 1, report_error);
-        -- ($vec-ptr:(sunindextype *c_diagnostics))[7] = ncfn;
-  
-        -- flag = CVodeGetNumJacEvals(cvode_mem, &nje);
-        -- check_flag(&flag, "CVodeGetNumJacEvals", 1, report_error);
-        -- ($vec-ptr:(sunindextype *c_diagnostics))[8] = nje;
-  
-        -- flag = CVodeGetNumLinRhsEvals(cvode_mem, &nfeLS);
-        -- check_flag(&flag, "CVodeGetNumLinRhsEvals", 1, report_error);
-        -- ($vec-ptr:(sunindextype *c_diagnostics))[9] = nfeLS;
-  
-        -- TODO: most of these should be handled by bracket style
-        -- /* Clean up and return */
-        -- N_VDestroy(y);          /* Free y vector          */
-        -- N_VDestroy(tv);         /* Free tv vector         */
-        -- CVodeFree(&cvode_mem);  /* Free integrator memory */
-        -- SUNLinSolFree(LS);      /* Free linear solver     */
-        -- SUNMatDestroy(A);       /* Free A matrix          */
-        -- SUNContext_Free(&sunctx);
-  
-        -- return CV_SUCCESS;
+            -- return CV_SUCCESS;
+            pure CV_SUCCESS
    --  |]
   
   {- Note [CV_TOO_CLOSE]
@@ -775,3 +819,15 @@ newtype SUNMatrix = SunMatrix (Ptr Void)
   deriving newtype Storable
 newtype SUNLinearSolver = SUNLinearSolver (Ptr Void)
   deriving newtype Storable
+
+
+foreign import ccall "CVodeGetNumSteps" cCVodeGetNumSteps :: CVodeMem -> Ptr SunIndexType -> IO CInt
+foreign import ccall "CVodeGetNumLinSolvSetups" cCVodeGetNumLinSolvSetups :: CVodeMem -> Ptr SunIndexType -> IO CInt
+foreign import ccall "CVodeGetNumErrTestFails" cCVodeGetNumErrTestFails :: CVodeMem -> Ptr SunIndexType -> IO CInt
+foreign import ccall "CVodeGetNumNonlinSolvIters" cCVodeGetNumNonlinSolvIters :: CVodeMem -> Ptr SunIndexType -> IO CInt
+foreign import ccall "CVodeGetNumNonlinSolvConvFails" cCVodeGetNumNonlinSolvConvFails :: CVodeMem -> Ptr SunIndexType -> IO CInt
+foreign import ccall "CVodeGetNumJacEvals" cCVodeGetNumJacEvals :: CVodeMem -> Ptr SunIndexType -> IO CInt
+foreign import ccall "CVodeGetNumRhsEvals" cCVodeGetNumRhsEvals :: CVodeMem -> Ptr SunIndexType -> IO CInt
+foreign import ccall "CVodeGetNumLinRhsEvals" cCVodeGetNumLinRhsEvals :: CVodeMem -> Ptr SunIndexType -> IO CInt
+
+
