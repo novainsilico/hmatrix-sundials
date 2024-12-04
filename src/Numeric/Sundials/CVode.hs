@@ -425,11 +425,11 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
 
   flag = CVodeGetNumJacEvals(cvode_mem, &nje);
   check_flag(&flag, "CVodeGetNumJacEvals", 1, report_error);
-  ($vec-ptr:(sunindextype *c_diagnostics))[8] = ncfn;
+  ($vec-ptr:(sunindextype *c_diagnostics))[8] = nje;
 
   flag = CVodeGetNumLinRhsEvals(cvode_mem, &nfeLS);
   check_flag(&flag, "CVodeGetNumLinRhsEvals", 1, report_error);
-  ($vec-ptr:(sunindextype *c_diagnostics))[9] = ncfn;
+  ($vec-ptr:(sunindextype *c_diagnostics))[9] = nfeLS;
 
   /* Clean up and return */
   N_VDestroy(y);          /* Free y vector          */
