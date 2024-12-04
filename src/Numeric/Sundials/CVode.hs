@@ -38,6 +38,10 @@ instance IsMethod CVMethod where
   methodToInt BDF   = cV_BDF
   methodType _ = Implicit
 
+newtype ReturnCode = ReturnCode Int
+  deriving (Exception, Show)
+
+
 solveC :: Ptr CInt -> CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CInt
 solveC ptrStop CConsts{..} CVars{..} log_env =
   let
@@ -110,7 +114,8 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
       -- }
       when (c_fixedstep > 0.0) $ do
         -- TODO: error reporting
-        error "fixedStep cannot be used with CVode"
+        -- error "fixedStep cannot be used with CVode"
+        throwIO $ ReturnCode 6426
       
   
       -- /* Initialize odeMaxEventsReached to False */
@@ -275,10 +280,13 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --     break;
              -- TODO: == with float sucks, considering that next_time_event is
              when (next_time_event == -1) $ do
-               error "haskell failure in the next time event function"
+               -- TODO: this is completly weird, but previous code was doing that...
+               throwIO (ReturnCode $ fromIntegral CV_SUCCESS)
+               -- error "haskell failure in the next time event function"
   
              when (next_time_event < t_start) $ do
-               error "time-based event is in the past..."
+               throwIO (ReturnCode 5669)
+               -- error "time-based event is in the past..."
              --   if (next_time_event < t_start) {
              --     size_t msg_size = 1000;
              --     char *msg = alloca(msg_size);
@@ -353,6 +361,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --     return 45;
                   -- TODO: this is weird, that's an early exit... Better raising for now
                     error "surplining early exit"
+                    -- throwIO (ReturnCode 45)
                   else
                     pure (t, flag)
              --   }
@@ -397,7 +406,8 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                --       return 8630;
                --     }
                when (event_ind >= c_max_events) $ do
-                 error "Maximum number of events reached"
+                 throwIO (ReturnCode 8630)
+                 -- error "Maximum number of events reached"
   
                --     /* How many events triggered? */
                --     int n_events_triggered = 0;
@@ -423,7 +433,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                  VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
                    flag <- cCVodeGetRootInfo cvode_mem c_root_info_ptr
                    when (flag < 0) $ do
-                     error "2829"
+                     throwIO $ ReturnCode 2829
                    let
                      go i n_events_triggered
                        | i >= c_n_event_specs = pure n_events_triggered
@@ -464,7 +474,8 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                        pure (stop_solver, record_event, err)
 
                    when (err /= 0) $ do
-                     error "Event handler failed internally"
+                     -- TODO: gain, insane
+                     throwIO $ ReturnCode (fromIntegral CV_SUCCESS)
 
                    pure (record_events, stop_solver)
                  else
@@ -538,7 +549,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                   --       goto finish;
                   --     }
                   when (stop_solver /= 0) $ do
-                    error "STOPPP"
+                     throwIO $ ReturnCode (fromIntegral CV_SUCCESS)
   
                   when (n_events_triggered > 0 || time_based_event) $ do
                     cCVodeReInit cvode_mem t y
@@ -566,8 +577,13 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --   }
              --   t_start = t;
              -- }
-        loop t_start input_ind (fromIntegral output_ind) 0
-        pure CV_SUCCESS
+        resM <- try $ loop t_start input_ind (fromIntegral output_ind) 0
+
+        case resM of
+          Right () -> pure CV_SUCCESS
+          Left (ReturnCode c)
+            | c == fromIntegral CV_SUCCESS -> pure CV_SUCCESS
+            | otherwise -> pure $ fromIntegral c
 
 
         -- TODO: finish the diagnostics
