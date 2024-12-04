@@ -383,25 +383,25 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
 
              --   ($vec-ptr:(int *c_n_rows))[0] = output_ind;
              VSM.write  c_n_rows 0 (fromIntegral output_ind)
-             pure 1
  
              --   if (root_based_event || time_based_event) {
-             when (root_based_event || time_based_event) $ do
-             --     DEBUG("Got an event");
-             --     if (event_ind >= $(int c_max_events)) {
-             --       /* We reached the maximum number of events.
-             --          Either the maximum number of events is set to 0,
-             --          or there's a bug in our code below. In any case return an error.
-             --       */
-             --       DEBUG("Maximum number of events reached");
-             --       return 8630;
-             --     }
+             (output_ind, event_ind) <- if not (root_based_event || time_based_event)
+              then pure (output_ind, event_ind)
+              else do
+               --     DEBUG("Got an event");
+               --     if (event_ind >= $(int c_max_events)) {
+               --       /* We reached the maximum number of events.
+               --          Either the maximum number of events is set to 0,
+               --          or there's a bug in our code below. In any case return an error.
+               --       */
+               --       DEBUG("Maximum number of events reached");
+               --       return 8630;
+               --     }
                when (event_ind >= c_max_events) $ do
                  error "Maximum number of events reached"
-            
   
-             --     /* How many events triggered? */
-             --     int n_events_triggered = 0;
+               --     /* How many events triggered? */
+               --     int n_events_triggered = 0;
                let n_events_triggered = 0
                --     int *c_root_info = ($vec-ptr:(int *c_root_info));
                --     if (root_based_event) {
@@ -456,7 +456,6 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                --     if (record_events) {
                if record_events /= 0
                then do
-                 error "TODO: record events"
                  --       DEBUG("Recording events");
                  --       /* A corner case: if the time-based event triggers at the very beginning,
                  --          then we don't want to duplicate the initial row, so rewind it back.
@@ -466,44 +465,74 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                  --         output_ind--;
                  --         /* c_n_rows will be updated below anyway */
                  --       }
-  
+                 output_ind <- if t == c_sol_time VS.! 0 && output_ind == 2
+                 then pure $ output_ind - 1
+                 else pure $ output_ind
+
                  --       ($vec-ptr:(double *c_output_mat))[output_ind * (c_dim + 1) + 0] = t;
                  --       for (j = 0; j < c_dim; j++) {
                  --         ($vec-ptr:(double *c_output_mat))[output_ind * (c_dim + 1) + (j + 1)] = NV_Ith_S(y,j);
                  --       }
+                 --
+                 --
+                 --
+                 VSM.write c_output_mat (output_ind * (fromIntegral c_dim + 1) + 0) t
+                 let
+                   go j
+                     | j == c_dim = pure ()
+                     | otherwise = do
+                        VSM.write c_output_mat (output_ind * fromIntegral (c_dim + 1) + (fromIntegral j + 1)) =<< cNV_Ith_S' y (fromIntegral j)
+                        go (j + 1)
+                 go 0
+ 
+
                  --       $fun:(void (*c_ontimepoint)(int))(output_ind);
+                 c_ontimepoint $ fromIntegral output_ind
+                 VSM.write c_n_rows 0 (fromIntegral output_ind + 1)
   
                  --       event_ind++;
                  --       output_ind++;
                  --       ($vec-ptr:(int *c_n_rows))[0] = output_ind;
                  --     } else {
+                 pure (output_ind + 1, event_ind + 1)
                else do
-                  error "TODO: not record events"
-
-             --       /* Remove the saved row — unless the event time also coincides with a requested time point */
-             --       if (t != ti) {
-             --         output_ind--;
-             --         ($vec-ptr:(int *c_n_rows))[0] = output_ind;
-             --       }
-             --     }
-             --     if (event_ind >= $(int c_max_events)) {
-             --       DEBUG("Reached max_events; returning");
-             --       ($vec-ptr:(sunindextype *c_diagnostics))[10] = 1;
-             --       stop_solver = 1;
-             --     }
-             --     if (stop_solver) {
-             --       DEBUG("Stopping the hmatrix-sundials solver as requested");
-             --       goto finish;
-             --     }
+                  output_ind <- if t /= ti
+                    then do
+                      VSM.write c_n_rows 0 (fromIntegral output_ind - 1)
+                      pure $ output_ind - 1
+                    else
+                      pure output_ind
+                  --       /* Remove the saved row — unless the event time also coincides with a requested time point */
+                  --       if (t != ti) {
+                  --         output_ind--;
+                  --         ($vec-ptr:(int *c_n_rows))[0] = output_ind;
+                  --       }
+                  --     }
+                  stop_solver <- if (event_ind >= c_max_events)
+                  then pure 1
+                  else pure stop_solver
+                  --     if (event_ind >= $(int c_max_events)) {
+                  --       DEBUG("Reached max_events; returning");
+                  --       ($vec-ptr:(sunindextype *c_diagnostics))[10] = 1;
+                  --       stop_solver = 1;
+                  --     }
+                  --     if (stop_solver) {
+                  --       DEBUG("Stopping the hmatrix-sundials solver as requested");
+                  --       goto finish;
+                  --     }
+                  when (stop_solver /= 0) $ do
+                    error "STOPPP"
   
-             --     if (n_events_triggered > 0 || time_based_event) {
-             --       DEBUG("Re-initializing the system");
-             --       flag = CVodeReInit(cvode_mem, t, y);
-             --       if (check_flag(&flag, "CVodeReInit", 1, report_error)) return(1576);
-             --     }
-             --   }
-             --
-
+                  when (n_events_triggered > 0 || time_based_event) $ do
+                    cCVodeReInit cvode_mem t y
+                  --     if (n_events_triggered > 0 || time_based_event) {
+                  --       DEBUG("Re-initializing the system");
+                  --       flag = CVodeReInit(cvode_mem, t, y);
+                  --       if (check_flag(&flag, "CVodeReInit", 1, report_error)) return(1576);
+                  --     }
+                  --   }
+                  --
+                  pure (output_ind, event_ind)
 
              if t == ti
              then
@@ -703,6 +732,8 @@ foreign import ccall "SUNDenseMatrix" cSUNDenseMatrix :: SunIndexType -> SunInde
 foreign import ccall "SUNLinSol_Dense" cSUNLinSol_Dense :: N_Vector -> SUNMatrix -> SunContext -> IO SUNLinearSolver
 
 foreign import ccall "CVode" cCVode :: CVodeMem -> CDouble -> N_Vector -> Ptr CDouble -> CInt -> IO CInt
+foreign import ccall "CVodeReInit" cCVodeReInit :: CVodeMem -> CDouble -> N_Vector -> IO ()
+
 
 -- | Opaque
 newtype SUNMatrix = SunMatrix (Ptr Void)
