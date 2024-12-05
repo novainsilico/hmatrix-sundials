@@ -2,6 +2,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE EmptyDataDecls #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Numeric.Sundials.Foreign
   ( getDataFromContents
@@ -59,6 +60,12 @@ module Numeric.Sundials.Foreign
   , kVAERNO_7_4_5
   , aRK548L2SA_DIRK_8_4_5
   , mIN_DIRK_NUM
+  , pattern CSC_MAT
+  , pattern CV_NORMAL
+  , pattern CV_ROOT_RETURN
+  , pattern CV_SUCCESS
+  , pattern CV_TOO_CLOSE
+  , getContentPtr, getData
   ) where
 
 import           Foreign
@@ -349,3 +356,10 @@ vERNER_8_5_6 :: CInt
 vERNER_8_5_6 = #const ARKODE_VERNER_8_5_6
 fEHLBERG_13_7_8 :: CInt
 fEHLBERG_13_7_8 = #const ARKODE_FEHLBERG_13_7_8
+
+pattern CSC_MAT, CV_NORMAL, CV_SUCCESS, CV_ROOT_RETURN, CV_TOO_CLOSE :: CInt
+pattern CSC_MAT = #const CSC_MAT
+pattern CV_NORMAL = #const CV_NORMAL
+pattern CV_SUCCESS = #const CV_SUCCESS
+pattern CV_ROOT_RETURN = #const CV_ROOT_RETURN
+pattern CV_TOO_CLOSE = #const CV_TOO_CLOSE
