@@ -3,6 +3,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 -- | Solution of ordinary differential equation (ODE) initial value problems.
 --
 -- <https://computation.llnl.gov/projects/sundials/sundials-software>
@@ -27,6 +29,7 @@ import Control.Monad (when)
 import Data.Void
 import Foreign.C
 import Data.Maybe (fromMaybe)
+import Control.Monad.State
 
 -- | Available methods for CVode
 data CVMethod = ADAMS
@@ -38,9 +41,18 @@ instance IsMethod CVMethod where
   methodToInt BDF   = cV_BDF
   methodType _ = Implicit
 
-newtype ReturnCode = ReturnCode Int
+data ReturnCode = ReturnCode Int
+                  | Finish LoopState
   deriving (Exception, Show)
 
+
+data LoopState = LoopState {
+  output_ind :: Int,
+  input_ind :: Int,
+  event_ind :: Int,
+  t_start :: CDouble
+}
+  deriving (Show)
 
 solveC :: Ptr CInt -> CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CInt
 solveC ptrStop CConsts{..} CVars{..} log_env =
@@ -70,11 +82,11 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
   withSunContext $ \sunctx -> do
       -- /* input_ind tracks the current index into the c_sol_time array */
       -- int input_ind = 1;
-      let input_ind = 1
+      let init_input_ind = 1
       -- /* output_ind tracks the current row into the c_output_mat matrix.
       --    If differs from input_ind because of the extra rows corresponding to events. */
       -- int output_ind = 1;
-      let output_ind = 1
+      let init_output_ind = 1 :: Int
       -- /* We need to update c_n_rows every time we update output_ind because
       --    of the possibility of early return (in which case we still need to assemble
       --    the partial results matrix). We could even work with c_n_rows only and ditch
@@ -83,7 +95,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
       -- */
       -- ($vec-ptr:(int *c_n_rows))[0] = output_ind;
       --
-      VSM.write  c_n_rows 0 (fromIntegral output_ind)
+      VSM.write  c_n_rows 0 (fromIntegral init_output_ind)
       -- /* event_ind tracks the current event number */
       -- int event_ind = 0;
   
@@ -102,7 +114,6 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
       --    an event may have eventRecord = False and not be present there.
       -- */
       -- double t_start = T0;
-      let t_start = t0
   
       -- /* Initialize data structures */
   
@@ -117,14 +128,13 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
         -- TODO: error reporting
         -- error "fixedStep cannot be used with CVode"
         throwIO $ ReturnCode 6426
-      
   
       -- /* Initialize odeMaxEventsReached to False */
       -- ($vec-ptr:(sunindextype *c_diagnostics))[10] = 0;
       VSM.write c_diagnostics 10 0
   
       -- y = N_VNew_Serial(c_dim, sunctx); /* Create serial vector for solution */
-      y <- cN_VNew_serial c_dim sunctx
+      y <- cN_VNew_Serial c_dim sunctx
       -- TODO: error reporting
       -- if (check_flag((void *)y, "N_VNew_Serial", 0, report_error)) return 6896;
 
@@ -154,7 +164,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
         cCVodeSetUserData cvode_mem c_rhs_userdata
   
         -- tv = N_VNew_Serial(c_dim, sunctx); /* Create serial vector for absolute tolerances */
-        tv <- cN_VNew_serial c_dim sunctx
+        tv <- cN_VNew_Serial c_dim sunctx
         -- if (check_flag((void *)tv, "N_VNew_Serial", 0, report_error)) return 6471;
         -- /* Specify tolerances */
         -- for (i = 0; i < c_dim; i++) {
@@ -249,11 +259,13 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                go (j + 1)
         go 0
  
-        c_ontimepoint output_ind
+        
+        c_ontimepoint (fromIntegral init_output_ind)
         -- $fun:(void (*c_ontimepoint)(int))(output_ind);
   
         let
-          loop t_start input_ind output_ind event_ind = do
+          loop :: StateT LoopState IO ()
+          loop = do
              -- while (1) {
              --    // The solver will run until it terminates or receive a signal to stop by the
              --    // way of a non null value in *ptrSTop
@@ -271,10 +283,11 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --   }
              --   TODO: remove the stop code, this is NOT required anymore, the exception will pop HERE
              --   double ti = ($vec-ptr:(double *c_sol_time))[input_ind];
-             let ti = fromMaybe (error "titi") $ c_sol_time VS.!? input_ind
+             s <- get
+             let ti = fromMaybe (error "titi") $ c_sol_time VS.!? s.input_ind
 
              --   double next_time_event = ($fun:(double (*c_next_time_event)()))();
-             next_time_event <- c_next_time_event
+             next_time_event <- liftIO c_next_time_event
   
              --   // Haskell failure in the next time event function
              --   if(next_time_event == -1)
@@ -282,11 +295,12 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              -- TODO: == with float sucks, considering that next_time_event is
              when (next_time_event == -1) $ do
                -- TODO: this is completly weird, but previous code was doing that...
-               throwIO (ReturnCode $ fromIntegral CV_SUCCESS)
+               liftIO $ throwIO (ReturnCode $ fromIntegral CV_SUCCESS)
                -- error "haskell failure in the next time event function"
   
-             when (next_time_event < t_start) $ do
-               throwIO (ReturnCode 5669)
+             when (next_time_event < s.t_start) $ do
+               s <- get
+               liftIO $ throwIO $ Finish s
                -- error "time-based event is in the past..."
              --   if (next_time_event < t_start) {
              --     size_t msg_size = 1000;
@@ -300,7 +314,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              let next_stop_time = min ti next_time_event
              --   DEBUG("Main loop iteration: t = %.17g (%a), next time point (ti) = %.17g, next time event = %.17g", t, ti, next_time_event);
              --   flag = CVode(cvode_mem, next_stop_time, y, &t, CV_NORMAL); /* call integrator */
-             (t, flag) <- alloca $ \t_ptr -> do
+             (t, flag) <- liftIO $ alloca $ \t_ptr -> do
                flag <- cCVode cvode_mem next_stop_time y t_ptr CV_NORMAL
                t <- peek t_ptr
                pure (t, flag)
@@ -322,8 +336,9 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --   }
              --   else
              else do
+               s <- get
              --   if (t == next_stop_time && t == t_start && flag == CV_ROOT_RETURN && !time_based_event) {
-               if t == next_stop_time && t == t_start && flag == CV_ROOT_RETURN && not time_based_event
+               if t == next_stop_time && t == s.t_start && flag == CV_ROOT_RETURN && not time_based_event
                then do
              --     /* See Note [CV_TOO_CLOSE]
              --        Probably the initial step size was set, and that's why we didn't
@@ -340,14 +355,18 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --     check_flag(&flag, "CVode", 1, report_error)) {
 
                  if not (flag == CV_TOO_CLOSE && time_based_event) && flag < 0
-                 then
+                 then do
                    -- TODO:  report an error
   
              --     N_Vector ele = N_VNew_Serial(c_dim, sunctx);
+                   ele <- liftIO $ cN_VNew_Serial c_dim sunctx
              --     N_Vector weights = N_VNew_Serial(c_dim, sunctx);
+                   weights <- liftIO $ cN_VNew_Serial c_dim sunctx
              --     flag = CVodeGetEstLocalErrors(cvode_mem, ele);
+                   flag <- liftIO $ cCVodeGetEstLocalErrors cvode_mem ele
              --     // CV_SUCCESS is defined is 0, so we OR the flags
              --     flag = flag || CVodeGetErrWeights(cvode_mem, weights);
+                   flag' <- liftIO $ cCVodeGetErrWeights cvode_mem weights
              --     if (flag == CV_SUCCESS) {
              --       double *arr_ptr = N_VGetArrayPointer(ele);
              --       memcpy(($vec-ptr:(double *c_local_error)), arr_ptr, c_dim * sizeof(double));
@@ -361,8 +380,9 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --     N_VDestroy(weights);
              --     return 45;
                   -- TODO: this is weird, that's an early exit... Better raising for now
-                    error "surplining early exit"
-                    -- throwIO (ReturnCode 45)
+                   when (flag == CV_SUCCESS && flag' == CV_SUCCESS) $ do
+                      error "BEURK BEURK"
+                   liftIO $ throwIO (ReturnCode 45)
                   else
                     pure (t, flag)
              --   }
@@ -373,30 +393,31 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --   for (j = 0; j < c_dim; j++) {
              --     ($vec-ptr:(double *c_output_mat))[output_ind * (c_dim + 1) + (j + 1)] = NV_Ith_S(y,j);
              --   }
-             VSM.write c_output_mat (output_ind * (fromIntegral c_dim + 1) + 0) t
+             s <- get
+             VSM.write c_output_mat (s.output_ind * (fromIntegral c_dim + 1) + 0) t
              let
                go j
                  | j == c_dim = pure ()
                  | otherwise = do
-                    VSM.write c_output_mat (output_ind * fromIntegral (c_dim + 1) + (fromIntegral j + 1)) =<< cNV_Ith_S' y (fromIntegral j)
+                    liftIO $ VSM.write c_output_mat (s.output_ind * fromIntegral (c_dim + 1) + (fromIntegral j + 1)) =<< cNV_Ith_S' y (fromIntegral j)
                     go (j + 1)
              go 0
  
   
              --   $fun:(void (*c_ontimepoint)(int))(output_ind);
-             c_ontimepoint (fromIntegral output_ind)
+             s <- get
+             liftIO $ c_ontimepoint (fromIntegral s.output_ind)
 
+             
              --   output_ind++;
-             --   WARNING: I'm doing something super UGLY here
-             output_ind <- pure (output_ind + 1)
+             modify $ \s -> s { output_ind = s.output_ind + 1}
 
+             s <- get
              --   ($vec-ptr:(int *c_n_rows))[0] = output_ind;
-             VSM.write  c_n_rows 0 (fromIntegral output_ind)
+             VSM.write  c_n_rows 0 (fromIntegral s.output_ind)
  
              --   if (root_based_event || time_based_event) {
-             (output_ind, event_ind) <- if not (root_based_event || time_based_event)
-              then pure (output_ind, event_ind)
-              else do
+             when (root_based_event || time_based_event) $ do
                --     DEBUG("Got an event");
                --     if (event_ind >= $(int c_max_events)) {
                --       /* We reached the maximum number of events.
@@ -406,8 +427,8 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                --       DEBUG("Maximum number of events reached");
                --       return 8630;
                --     }
-               when (event_ind >= c_max_events) $ do
-                 throwIO (ReturnCode 8630)
+               when (fromIntegral s.event_ind >= c_max_events) $ do
+                 liftIO $ throwIO (ReturnCode 8630)
                  -- error "Maximum number of events reached"
   
                --     /* How many events triggered? */
@@ -431,7 +452,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                n_events_triggered <- if not root_based_event
                then pure 0
                else do
-                 VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
+                 liftIO $ VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
                    flag <- cCVodeGetRootInfo cvode_mem c_root_info_ptr
                    when (flag < 0) $ do
                      throwIO $ ReturnCode 2829
@@ -466,7 +487,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                (record_events, stop_solver) <-
                  if (n_events_triggered > 0 || time_based_event)
                  then do
-                   (stop_solver, record_events, err) <- alloca $ \stop_solver_ptr -> alloca $ \record_event_ptr -> do
+                   (stop_solver, record_events, err) <- liftIO $ alloca $ \stop_solver_ptr -> alloca $ \record_event_ptr -> do
                        err <- VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
                          err <- c_apply_event (fromIntegral n_events_triggered) c_root_info_ptr t (coerce y) (coerce y) stop_solver_ptr record_event_ptr
                          pure err
@@ -476,7 +497,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
 
                    when (err /= 0) $ do
                      -- TODO: gain, insane
-                     throwIO $ ReturnCode (fromIntegral CV_SUCCESS)
+                     liftIO $ throwIO $ ReturnCode (fromIntegral CV_SUCCESS)
 
                    pure (record_events, stop_solver)
                  else
@@ -494,9 +515,9 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                  --         output_ind--;
                  --         /* c_n_rows will be updated below anyway */
                  --       }
-                 output_ind <- if t == c_sol_time VS.! 0 && output_ind == 2
-                 then pure $ output_ind - 1
-                 else pure $ output_ind
+                 s <- get
+                 when (t == c_sol_time VS.! 0 && s.output_ind == 2) $ do
+                   modify $ \s -> s { output_ind = s.output_ind - 1 }
 
                  --       ($vec-ptr:(double *c_output_mat))[output_ind * (c_dim + 1) + 0] = t;
                  --       for (j = 0; j < c_dim; j++) {
@@ -505,39 +526,41 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                  --
                  --
                  --
-                 VSM.write c_output_mat (output_ind * (fromIntegral c_dim + 1) + 0) t
+                 s <- get
+                 VSM.write c_output_mat (s.output_ind * (fromIntegral c_dim + 1) + 0) t
                  let
                    go j
                      | j == c_dim = pure ()
                      | otherwise = do
-                        VSM.write c_output_mat (output_ind * fromIntegral (c_dim + 1) + (fromIntegral j + 1)) =<< cNV_Ith_S' y (fromIntegral j)
+                        liftIO $ VSM.write c_output_mat (s.output_ind * fromIntegral (c_dim + 1) + (fromIntegral j + 1)) =<< cNV_Ith_S' y (fromIntegral j)
                         go (j + 1)
                  go 0
  
 
                  --       $fun:(void (*c_ontimepoint)(int))(output_ind);
-                 c_ontimepoint $ fromIntegral output_ind
-                 VSM.write c_n_rows 0 (fromIntegral output_ind + 1)
+                 s <- get
+                 liftIO $ c_ontimepoint $ fromIntegral s.output_ind
+                 modify $ \s -> s { event_ind = s.event_ind + 1, output_ind = s.output_ind + 1 }
+                 s <- get
+                 VSM.write c_n_rows 0 (fromIntegral s.output_ind)
   
                  --       event_ind++;
                  --       output_ind++;
                  --       ($vec-ptr:(int *c_n_rows))[0] = output_ind;
                  --     } else {
-                 pure (output_ind + 1, event_ind + 1)
                else do
-                  output_ind <- if t /= ti
-                    then do
-                      VSM.write c_n_rows 0 (fromIntegral output_ind - 1)
-                      pure $ output_ind - 1
-                    else
-                      pure output_ind
+                  when (t /= ti) $ do
+                      modify $ \s -> s { output_ind = s.output_ind - 1 }
+                      s <- get
+                      VSM.write c_n_rows 0 (fromIntegral s.output_ind)
                   --       /* Remove the saved row — unless the event time also coincides with a requested time point */
                   --       if (t != ti) {
                   --         output_ind--;
                   --         ($vec-ptr:(int *c_n_rows))[0] = output_ind;
                   --       }
                   --     }
-                  stop_solver <- if (event_ind >= c_max_events)
+                  s <- get
+                  stop_solver <- if (fromIntegral s.event_ind >= c_max_events)
                   then do
                     VSM.write c_diagnostics 10 1
                     pure 1
@@ -552,10 +575,11 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                   --       goto finish;
                   --     }
                   when (stop_solver /= 0) $ do
-                     throwIO $ ReturnCode (fromIntegral CV_SUCCESS)
+                     s <- get 
+                     liftIO $ throwIO $ Finish s
   
                   when (n_events_triggered > 0 || time_based_event) $ do
-                    cCVodeReInit cvode_mem t y
+                    liftIO $ cCVodeReInit cvode_mem t y
                   --     if (n_events_triggered > 0 || time_based_event) {
                   --       DEBUG("Re-initializing the system");
                   --       flag = CVodeReInit(cvode_mem, t, y);
@@ -563,36 +587,45 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                   --     }
                   --   }
                   --
-                  pure (output_ind, event_ind)
 
-             if t == ti
-             then
-               if input_ind + 1 >= fromIntegral c_n_sol_times
-               then
-                 pure event_ind
-               else
-                 loop t (input_ind + 1) output_ind event_ind
-             else
-               loop t input_ind output_ind event_ind
+             s <- get
+             when (t == ti) $ do
+               modify $ \s -> s {input_ind = s.input_ind + 1 }
+               s <- get
+               when (s.input_ind >= fromIntegral c_n_sol_times) $ do
+
+                 s <- get 
+                 liftIO $ throwIO $ Finish s
+
+             modify $ \s -> s {t_start = t}
+             loop
              --   if (t == ti) {
              --     if (++input_ind >= $(int c_n_sol_times))
              --       goto finish;
              --   }
              --   t_start = t;
              -- }
-        resM <- try $ loop t_start input_ind (fromIntegral output_ind) 0
+        resM <- try $ execStateT loop (LoopState {
+          output_ind = init_output_ind,
+          input_ind = init_input_ind,
+          event_ind = 0,
+          t_start = t0})
 
         case resM of
           Left (ReturnCode c)
             | c == fromIntegral CV_SUCCESS -> pure CV_SUCCESS
             | otherwise -> pure $ (fromIntegral c)
-          Right event_ind -> do
+          Right finalState -> end cvode_mem finalState
+          Left (Finish finalState) -> end cvode_mem finalState
+        where
+          end cvode_mem finalState = do
+        
             -- finish:
             -- DEBUG("Cleaning up before returning from the hmatrix-sundials solver");
   
             -- /* The number of actual roots we found */
             -- ($vec-ptr:(int *c_n_events))[0] = event_ind;
-            VSM.write c_n_events 0 event_ind
+            VSM.write c_n_events 0 (fromIntegral finalState.event_ind)
   
             -- /* Get some final statistics on how the solve progressed */
             -- flag = CVodeGetNumSteps(cvode_mem, &nst);
@@ -777,7 +810,7 @@ foreign import ccall "CVodeInit" cCVodeInit :: CVodeMem -> FunPtr OdeRhsCType ->
 -- | An opaque pointer to an N_Vector
 newtype N_Vector = N_Vector (Ptr Void)
 
-foreign import ccall "N_VNew_Serial" cN_VNew_serial :: SunIndexType -> SunContext -> IO N_Vector
+foreign import ccall "N_VNew_Serial" cN_VNew_Serial :: SunIndexType -> SunContext -> IO N_Vector
 
 cNV_Ith_S (N_Vector ptr) i v = do
   qtr <- getContentPtr ptr
@@ -831,5 +864,9 @@ foreign import ccall "CVodeGetNumNonlinSolvConvFails" cCVodeGetNumNonlinSolvConv
 foreign import ccall "CVodeGetNumJacEvals" cCVodeGetNumJacEvals :: CVodeMem -> Ptr SunIndexType -> IO CInt
 foreign import ccall "CVodeGetNumRhsEvals" cCVodeGetNumRhsEvals :: CVodeMem -> Ptr SunIndexType -> IO CInt
 foreign import ccall "CVodeGetNumLinRhsEvals" cCVodeGetNumLinRhsEvals :: CVodeMem -> Ptr SunIndexType -> IO CInt
+
+
+foreign import ccall "CVodeGetEstLocalErrors" cCVodeGetEstLocalErrors :: CVodeMem -> N_Vector -> IO CInt
+foreign import ccall "CVodeGetErrWeights" cCVodeGetErrWeights :: CVodeMem -> N_Vector -> IO CInt
 
 
