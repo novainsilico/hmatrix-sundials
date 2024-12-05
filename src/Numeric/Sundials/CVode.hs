@@ -5,6 +5,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# OPTIONS_GHC -Wno-name-shadowing #-}
 -- | Solution of ordinary differential equation (ODE) initial value problems.
 --
 -- <https://computation.llnl.gov/projects/sundials/sundials-software>
@@ -30,7 +31,7 @@ import Data.Void
 import Foreign.C
 import Data.Maybe (fromMaybe)
 import Control.Monad.State
-import Debug.Trace (traceShow, traceShowId)
+import GHC.Stack
 
 -- | Available methods for CVode
 data CVMethod = ADAMS
@@ -103,7 +104,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
       -- /* general problem parameters */
   
       -- realtype T0 = RCONST(($vec-ptr:(double *c_sol_time))[0]); /* initial time              */
-      let t0 = fromMaybe (error "t0") $ c_sol_time VS.!? 0
+      let t0 = fromMaybe (error "no t0") $ c_sol_time VS.!? 0
       -- sunindextype c_dim = $(sunindextype c_dim);           /* number of dependent vars. */
   
       -- /* t_start tracks the starting point of the integration in order to detect
@@ -151,7 +152,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
         withCVodeMem c_method sunctx $ \cvode_mem -> do
         -- flag = CVodeInit(cvode_mem, $(int (* c_rhs) (realtype, N_Vector, N_Vector, UserData*)), T0, y);
         -- if (check_flag(&flag, "CVodeInit", 1, report_error)) return(1960);
-          cCVodeInit cvode_mem c_rhs t0 y
+          cCVodeInit cvode_mem c_rhs t0 y >>= check 1960
     
           -- /* Set the error handler */
           -- TODO 
@@ -162,7 +163,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
           -- /* Set the user data */
           -- flag = CVodeSetUserData(cvode_mem, $(UserData* c_rhs_userdata));
           -- if (check_flag(&flag, "CVodeSetUserData", 1, report_error)) return(1949);
-          cCVodeSetUserData cvode_mem c_rhs_userdata
+          cCVodeSetUserData cvode_mem c_rhs_userdata >>= check 1949
     
           -- tv = N_VNew_Serial(c_dim, sunctx); /* Create serial vector for absolute tolerances */
           withNVector_Serial c_dim sunctx $ \tv -> do
@@ -174,27 +175,27 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
             VS.imapM_ (\i v -> cNV_Ith_S tv i v) c_atol
       
             -- flag = CVodeSetMinStep(cvode_mem, $(double c_minstep));
-            cCVodeSetMinStep cvode_mem c_minstep
+            cCVodeSetMinStep cvode_mem c_minstep >>= check 6433
             -- if (check_flag(&flag, "CVodeSetMinStep", 1, report_error)) return 6433;
             -- flag = CVodeSetMaxNumSteps(cvode_mem, $(sunindextype c_max_n_steps));
-            cCVodeSetMaxNumSteps cvode_mem c_max_n_steps
+            cCVodeSetMaxNumSteps cvode_mem c_max_n_steps >>= check 9904
             -- if (check_flag(&flag, "CVodeSetMaxNumSteps", 1, report_error)) return 9904;
             -- flag = CVodeSetMaxErrTestFails(cvode_mem, $(int c_max_err_test_fails));
-            cCVodeSetMaxErrTestFails cvode_mem c_max_err_test_fails
+            cCVodeSetMaxErrTestFails cvode_mem c_max_err_test_fails >>= check 2512
             -- if (check_flag(&flag, "CVodeSetMaxErrTestFails", 1, report_error)) return 2512;
       
             -- /* Specify the scalar relative tolerance and vector absolute tolerances */
             -- flag = CVodeSVtolerances(cvode_mem, $(double c_rtol), tv);
-            cCVodeSVtolerances cvode_mem c_rtol tv
+            cCVodeSVtolerances cvode_mem c_rtol tv >>= check 6212
             -- if (check_flag(&flag, "CVodeSVtolerances", 1, report_error)) return(6212);
       
             -- /* Specify the root function */
             -- flag = CVodeRootInit(cvode_mem, $(int c_n_event_specs), $(int (* c_event_fn) (realtype, N_Vector, realtype*, UserData*)));
-            cCVodeRootInit cvode_mem c_n_event_specs c_event_fn
+            cCVodeRootInit cvode_mem c_n_event_specs c_event_fn >>= check 6290
             -- if (check_flag(&flag, "CVodeRootInit", 1, report_error)) return(6290);
             -- /* Disable the inactive roots warning; see https://git.novadiscovery.net/jinko/jinko/-/issues/2368 */
             -- flag = CVodeSetNoInactiveRootWarn(cvode_mem);
-            cCVodeSetNoInactiveRootWarn cvode_mem
+            cCVodeSetNoInactiveRootWarn cvode_mem >>= check 6291
             -- if (check_flag(&flag, "CVodeSetNoInactiveRootWarn", 1, report_error)) return(6291);
 
             -- TODO: initialize jacobian
@@ -223,7 +224,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
       
             -- /* Attach matrix and linear solver */
             -- flag = CVodeSetLinearSolver(cvode_mem, LS, A);
-            cCVodeSetLinearSolver cvode_mem ls a
+            cCVodeSetLinearSolver cvode_mem ls a >>= check 2625
             -- if (check_flag(&flag, "CVodeSetLinearSolver", 1, report_error)) return 2625;
       
             -- /* Set the initial step size if there is one */
@@ -234,8 +235,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
             --   if (check_flag(&flag, "CVodeSetInitStep", 1, report_error)) return 4010;
             -- }
             when (c_init_step_size_set /= 0) $ do
-              cCVodeSetInitStep cvode_mem c_init_step_size
-              pure ()
+              cCVodeSetInitStep cvode_mem c_init_step_size >>= check 4010
       
             -- /* Set the Jacobian if there is one */
             -- if ($(int c_jac_set)) {
@@ -267,8 +267,6 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
             let
               loop :: StateT LoopState IO ()
               loop = do
-                 s <- get
-                 liftIO $ print ("loop",s)
                  -- while (1) {
                  --    // The solver will run until it terminates or receive a signal to stop by the
                  --    // way of a non null value in *ptrSTop
@@ -287,7 +285,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                  --   TODO: remove the stop code, this is NOT required anymore, the exception will pop HERE
                  --   double ti = ($vec-ptr:(double *c_sol_time))[input_ind];
                  s <- get
-                 let ti = fromMaybe (error "titi") $ traceShowId c_sol_time VS.!? s.input_ind
+                 let ti = fromMaybe (error "Incorrect c_sol_time access") $ c_sol_time VS.!? s.input_ind
 
                  --   double next_time_event = ($fun:(double (*c_next_time_event)()))();
                  next_time_event <- liftIO c_next_time_event
@@ -318,10 +316,8 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                  --   DEBUG("Main loop iteration: t = %.17g (%a), next time point (ti) = %.17g, next time event = %.17g", t, ti, next_time_event);
                  --   flag = CVode(cvode_mem, next_stop_time, y, &t, CV_NORMAL); /* call integrator */
                  (t, flag) <- liftIO $ alloca $ \t_ptr -> do
-                   print "cv"
                    flag <- cCVode cvode_mem next_stop_time y t_ptr CV_NORMAL
                    t <- peek t_ptr
-                   print ("/cv", t)
                    pure (t, flag)
 
                  --   DEBUG("CVode returned %d; now t = %.17g\n", flag, t);
@@ -594,8 +590,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                    --   }
                    --
 
-                 s <- get
-                 when (traceShow (t, ti) t == ti) $ do
+                 when (t == ti) $ do
                    modify $ \s -> s {input_ind = s.input_ind + 1 }
                    s <- get
                    when (s.input_ind >= fromIntegral c_n_sol_times) $ do
@@ -625,108 +620,46 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
               Left (Finish finalState) -> end cvode_mem finalState
             where
               end cvode_mem finalState = do
-            
-                -- finish:
                 -- DEBUG("Cleaning up before returning from the hmatrix-sundials solver");
+                -- TODO: clean the input diagnostics logic so we can just
+                -- export the struct instead of writing on arbitrary offsets.
       
                 -- /* The number of actual roots we found */
-                -- ($vec-ptr:(int *c_n_events))[0] = event_ind;
                 VSM.write c_n_events 0 (fromIntegral finalState.event_ind)
       
                 -- /* Get some final statistics on how the solve progressed */
-                -- flag = CVodeGetNumSteps(cvode_mem, &nst);
-                -- check_flag(&flag, "CVodeGetNumSteps", 1, report_error);
-                -- ($vec-ptr:(sunindextype *c_diagnostics))[0] = nst;
-                --
-                alloca $ \ptr -> do
-                  cCVodeGetNumSteps cvode_mem ptr
-                  val <- peek ptr
-                  VSM.write c_diagnostics 0 val
+                nst <- cvGet cCVodeGetNumSteps cvode_mem
+                VSM.write c_diagnostics 0 (fromIntegral nst)
       
                 -- /* FIXME */
-                -- ($vec-ptr:(sunindextype *c_diagnostics))[1] = 0;
                 VSM.write c_diagnostics 1 0
       
-                -- flag = CVodeGetNumRhsEvals(cvode_mem, &nfe);
-                -- check_flag(&flag, "CVodeGetNumRhsEvals", 1, report_error);
-                -- ($vec-ptr:(sunindextype *c_diagnostics))[2] = nfe;
-                
-                alloca $ \ptr -> do
-                  cCVodeGetNumRhsEvals cvode_mem ptr
-                  val <- peek ptr
-                  VSM.write c_diagnostics 2 val
+                nfe <- cvGet cCVodeGetNumRhsEvals cvode_mem
+                VSM.write c_diagnostics 2 (fromIntegral nfe)
                 
                 -- /* FIXME */
-                -- ($vec-ptr:(sunindextype *c_diagnostics))[3] = 0;
-      
                 VSM.write c_diagnostics 3 0
 
-                -- flag = CVodeGetNumLinSolvSetups(cvode_mem, &nsetups);
-                -- check_flag(&flag, "CVodeGetNumLinSolvSetups", 1, report_error);
-                -- ($vec-ptr:(sunindextype *c_diagnostics))[4] = nsetups;
-     
-                alloca $ \ptr -> do
-                  cCVodeGetNumLinSolvSetups cvode_mem ptr
-                  val <- peek ptr
-                  VSM.write c_diagnostics 4 val
-
-                -- flag = CVodeGetNumErrTestFails(cvode_mem, &netf);
-                -- check_flag(&flag, "CVodeGetNumErrTestFails", 1, report_error);
-                -- ($vec-ptr:(sunindextype *c_diagnostics))[5] = netf;
+                nsetups <- cvGet cCVodeGetNumLinSolvSetups cvode_mem
+                VSM.write c_diagnostics 4 (fromIntegral nsetups)
                 
-                alloca $ \ptr -> do
-                  cCVodeGetNumErrTestFails cvode_mem ptr
-                  val <- peek ptr
-                  VSM.write c_diagnostics 5 val
-      
-                -- flag = CVodeGetNumNonlinSolvIters(cvode_mem, &nni);
-                -- check_flag(&flag, "CVodeGetNumNonlinSolvIters", 1, report_error);
-                -- ($vec-ptr:(sunindextype *c_diagnostics))[6] = nni;
+                netf <- cvGet cCVodeGetNumErrTestFails cvode_mem
+                VSM.write c_diagnostics 5 (fromIntegral netf)
 
-                alloca $ \ptr -> do
-                  cCVodeGetNumNonlinSolvIters cvode_mem ptr
-                  val <- peek ptr
-                  VSM.write c_diagnostics 6 val
-      
-                -- flag = CVodeGetNumNonlinSolvConvFails(cvode_mem, &ncfn);
-                -- check_flag(&flag, "CVodeGetNumNonlinSolvConvFails", 1, report_error);
-                -- ($vec-ptr:(sunindextype *c_diagnostics))[7] = ncfn;
-      
+                nni <- cvGet cCVodeGetNumNonlinSolvIters cvode_mem
+                VSM.write c_diagnostics 6 (fromIntegral nni)
 
-                alloca $ \ptr -> do
-                  cCVodeGetNumNonlinSolvConvFails cvode_mem ptr
-                  val <- peek ptr
-                  VSM.write c_diagnostics 7 val
-
-                -- flag = CVodeGetNumJacEvals(cvode_mem, &nje);
-                -- check_flag(&flag, "CVodeGetNumJacEvals", 1, report_error);
-                -- ($vec-ptr:(sunindextype *c_diagnostics))[8] = nje;
+                ncfn <- cvGet cCVodeGetNumNonlinSolvConvFails cvode_mem
+                VSM.write c_diagnostics 7 (fromIntegral ncfn)
      
-                alloca $ \ptr -> do
-                  cCVodeGetNumJacEvals cvode_mem ptr
-                  val <- peek ptr
-                  VSM.write c_diagnostics 8 val
-
-                -- flag = CVodeGetNumLinRhsEvals(cvode_mem, &nfeLS);
-                -- check_flag(&flag, "CVodeGetNumLinRhsEvals", 1, report_error);
-                -- ($vec-ptr:(sunindextype *c_diagnostics))[9] = nfeLS;
+                nje <- cvGet cCVodeGetNumJacEvals cvode_mem
+                VSM.write c_diagnostics 8 (fromIntegral nje)
      
-                alloca $ \ptr -> do
-                  cCVodeGetNumLinRhsEvals cvode_mem ptr
-                  val <- peek ptr
-                  VSM.write c_diagnostics 9 val
+                nfeLS <- cvGet cCVodeGetNumLinRhsEvals cvode_mem
+                VSM.write c_diagnostics 9 (fromIntegral nfeLS)
 
-                -- TODO: most of these should be handled by bracket style
                 -- /* Clean up and return */
-                -- N_VDestroy(y);          /* Free y vector          */
-                -- N_VDestroy(tv);         /* Free tv vector         */
-                -- CVodeFree(&cvode_mem);  /* Free integrator memory */
-                -- SUNLinSolFree(LS);      /* Free linear solver     */
-                -- SUNMatDestroy(A);       /* Free A matrix          */
-                -- SUNContext_Free(&sunctx);
-      
-                -- return CV_SUCCESS;
-
+                -- Cleanup is unsured by bracket and withXXX
                 -- SUNLinSolFree ls
                 -- SUNMatDestroy a
                 let need_to_clean_the_linsol_and_mat = undefined
@@ -789,6 +722,11 @@ withSunContext cont = do
       sunctx <- peek ptr
       cont sunctx
 
+check :: HasCallStack => Int -> CInt -> IO ()
+check retCode status
+  | status == CV_SUCCESS = pure ()
+  | otherwise = throwIO (ReturnCode retCode)
+
 foreign import ccall "SUNContext_Create" unsafeSUNContext_Create :: Int -> Ptr SunContext -> IO CInt
 foreign import ccall "SUNContext_Free" unsafeSUNContext_Free :: Ptr SunContext -> IO CInt
 
@@ -827,10 +765,13 @@ withNVector_Serial t suncontext f = do
   bracket (unsafeN_VNew_Serial t suncontext) unsafeN_VDestroy f
 
 
+cNV_Ith_S :: N_Vector -> Int -> CDouble -> IO ()
 cNV_Ith_S (N_Vector ptr) i v = do
   qtr <- getContentPtr ptr
   rtr <- getData qtr
   pokeElemOff rtr i v
+
+cNV_Ith_S' :: N_Vector -> Int -> IO CDouble
 cNV_Ith_S' (N_Vector ptr) i = do
   qtr <- getContentPtr ptr
   rtr <- getData qtr
@@ -871,14 +812,22 @@ newtype SUNLinearSolver = SUNLinearSolver (Ptr Void)
   deriving newtype Storable
 
 
-foreign import ccall "CVodeGetNumSteps" cCVodeGetNumSteps :: CVodeMem -> Ptr SunIndexType -> IO CInt
-foreign import ccall "CVodeGetNumLinSolvSetups" cCVodeGetNumLinSolvSetups :: CVodeMem -> Ptr SunIndexType -> IO CInt
-foreign import ccall "CVodeGetNumErrTestFails" cCVodeGetNumErrTestFails :: CVodeMem -> Ptr SunIndexType -> IO CInt
-foreign import ccall "CVodeGetNumNonlinSolvIters" cCVodeGetNumNonlinSolvIters :: CVodeMem -> Ptr SunIndexType -> IO CInt
-foreign import ccall "CVodeGetNumNonlinSolvConvFails" cCVodeGetNumNonlinSolvConvFails :: CVodeMem -> Ptr SunIndexType -> IO CInt
-foreign import ccall "CVodeGetNumJacEvals" cCVodeGetNumJacEvals :: CVodeMem -> Ptr SunIndexType -> IO CInt
-foreign import ccall "CVodeGetNumRhsEvals" cCVodeGetNumRhsEvals :: CVodeMem -> Ptr SunIndexType -> IO CInt
-foreign import ccall "CVodeGetNumLinRhsEvals" cCVodeGetNumLinRhsEvals :: CVodeMem -> Ptr SunIndexType -> IO CInt
+foreign import ccall "CVodeGetNumSteps" cCVodeGetNumSteps :: CVodeMem -> Ptr CLong -> IO CInt
+foreign import ccall "CVodeGetNumLinSolvSetups" cCVodeGetNumLinSolvSetups :: CVodeMem -> Ptr CLong -> IO CInt
+foreign import ccall "CVodeGetNumErrTestFails" cCVodeGetNumErrTestFails :: CVodeMem -> Ptr CLong -> IO CInt
+foreign import ccall "CVodeGetNumNonlinSolvIters" cCVodeGetNumNonlinSolvIters :: CVodeMem -> Ptr CLong -> IO CInt
+foreign import ccall "CVodeGetNumNonlinSolvConvFails" cCVodeGetNumNonlinSolvConvFails :: CVodeMem -> Ptr CLong -> IO CInt
+foreign import ccall "CVodeGetNumJacEvals" cCVodeGetNumJacEvals :: CVodeMem -> Ptr CLong -> IO CInt
+foreign import ccall "CVodeGetNumRhsEvals" cCVodeGetNumRhsEvals :: CVodeMem -> Ptr CLong -> IO CInt
+foreign import ccall "CVodeGetNumLinRhsEvals" cCVodeGetNumLinRhsEvals :: CVodeMem -> Ptr CLong -> IO CInt
+
+cvGet :: HasCallStack => Storable b => (CVodeMem -> Ptr b -> IO CInt) -> CVodeMem -> IO b
+cvGet getter cvode_mem = do
+  alloca $ \ptr -> do
+    err <- getter cvode_mem ptr
+    when (err /= CV_SUCCESS) $ do
+      error $ "Failure during cvGet"
+    peek ptr
 
 
 foreign import ccall "CVodeGetEstLocalErrors" cCVodeGetEstLocalErrors :: CVodeMem -> N_Vector -> IO CInt
