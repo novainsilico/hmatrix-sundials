@@ -168,32 +168,17 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
             withLinearSolver $ \ls a -> do
               -- /* Attach matrix and linear solver */
               cCVodeSetLinearSolver cvode_mem ls a >>= check 2625
-              -- if (check_flag(&flag, "CVodeSetLinearSolver", 1, report_error)) return 2625;
-        
               -- /* Set the initial step size if there is one */
-              -- if ($(int c_init_step_size_set)) {
-              --   /* FIXME: We could check if the initial step size is 0 */
-              --   /* or even NaN and then throw an error                 */
-              --   flag = CVodeSetInitStep(cvode_mem, $(double c_init_step_size));
-              --   if (check_flag(&flag, "CVodeSetInitStep", 1, report_error)) return 4010;
-              -- }
               when (c_init_step_size_set /= 0) $ do
+                --   /* FIXME: We could check if the initial step size is 0 */
+                --   /* or even NaN and then throw an error                 */
                 cCVodeSetInitStep cvode_mem c_init_step_size >>= check 4010
         
               -- /* Set the Jacobian if there is one */
-              -- if ($(int c_jac_set)) {
-              --   CVLsJacFn c_jac = $(int (*c_jac)(realtype, N_Vector, N_Vector, SUNMatrix, UserData*, N_Vector, N_Vector, N_Vector));
-              --   flag = CVodeSetJacFn(cvode_mem, c_jac);
-              --   if (check_flag(&flag, "CVodeSetJacFn", 1, report_error)) return 3124;
-              -- }
               when (c_jac_set /= 0) $ do
-                cCVodeSetJacFn cvode_mem c_jac
+                cCVodeSetJacFn cvode_mem c_jac >>= check 3124
        
               -- /* Store initial conditions */
-              -- ($vec-ptr:(double *c_output_mat))[0 * (c_dim + 1) + 0] = ($vec-ptr:(double *c_sol_time))[0];
-              -- for (j = 0; j < c_dim; j++) {
-              --   ($vec-ptr:(double *c_output_mat))[0 * (c_dim + 1) + (j + 1)] = NV_Ith_S(y,j);
-              -- }
               VSM.write c_output_mat (0 * (fromIntegral c_dim + 1) + 0) (c_sol_time VS.! 0)
               let
                 go j
@@ -205,83 +190,46 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
        
               
               c_ontimepoint (fromIntegral init_loop.output_ind)
-              -- $fun:(void (*c_ontimepoint)(int))(output_ind);
         
               let
                 loop :: StateT LoopState IO ()
                 loop = do
-                   -- while (1) {
-                   --    // The solver will run until it terminates or receive a signal to stop by the
-                   --    // way of a non null value in *ptrSTop
-                   --    // The signal is an exception from outside (see the solve function in
-                   --    // Numeric/Sundials.hs
-                   --   // Ensure proper memory barrier.
-                   --   // This cannot be simply replaced by if(*ptrStop) because the compiler is free to consider ptrStop as a constant for the complete loop execution.
-                   --   // So instead, we use __atomic_load to force the load
-                   --   int stopFlag = 0;
-                   --   __atomic_load($(int* ptrStop), &stopFlag, __ATOMIC_SEQ_CST);
-        
-                   --   if(stopFlag)
-                   --   {
-                   --     break;
-                   --   }
-                   --   TODO: remove the stop code, this is NOT required anymore, the exception will pop HERE
-                   --   double ti = ($vec-ptr:(double *c_sol_time))[input_ind];
                    s <- get
                    let ti = fromMaybe (error "Incorrect c_sol_time access") $ c_sol_time VS.!? s.input_ind
 
-                   --   double next_time_event = ($fun:(double (*c_next_time_event)()))();
                    next_time_event <- liftIO c_next_time_event
         
                    --   // Haskell failure in the next time event function
-                   --   if(next_time_event == -1)
-                   --     break;
-                   -- TODO: == with float sucks, considering that next_time_event is
+                   -- TODO: == with float sucks, considering that
+                   -- next_time_event could return a Maybe
                    when (next_time_event == -1) $ do
                      -- TODO: this is completly weird, but previous code was doing that...
                      liftIO $ throwIO (ReturnCode $ fromIntegral CV_SUCCESS)
-                     -- error "haskell failure in the next time event function"
         
                    when (next_time_event < s.t_start) $ do
                      s <- get
                      liftIO $ throwIO $ Finish s
-                     -- error "time-based event is in the past..."
-                   --   if (next_time_event < t_start) {
-                   --     size_t msg_size = 1000;
-                   --     char *msg = alloca(msg_size);
                    --     snprintf(msg, msg_size, "time-based event is in the past: next event time = %.4f while we are at %.4f", next_time_event, t_start);
-                   --     report_error(0, "hmatrix-sundials", "solveC", msg, NULL);
-                   --     retval = 5669;
-                   --     goto finish;
-                   --   }
-                   --   double next_stop_time = fmin(ti, next_time_event);
+                   
                    let next_stop_time = min ti next_time_event
                    --   DEBUG("Main loop iteration: t = %.17g (%a), next time point (ti) = %.17g, next time event = %.17g", t, ti, next_time_event);
-                   --   flag = CVode(cvode_mem, next_stop_time, y, &t, CV_NORMAL); /* call integrator */
                    (t, flag) <- liftIO $ alloca $ \t_ptr -> do
                      flag <- cCVode cvode_mem next_stop_time y t_ptr CV_NORMAL
                      t <- peek t_ptr
                      pure (t, flag)
 
                    --   DEBUG("CVode returned %d; now t = %.17g\n", flag, t);
-                   --   int root_based_event = flag == CV_ROOT_RETURN;
                    let root_based_event = flag == CV_ROOT_RETURN
-                   --   int time_based_event = t == next_time_event;
                    let time_based_event = t == next_time_event
-                   --   if (flag == CV_TOO_CLOSE && !time_based_event) {
                    (t, flag) <- if flag == CV_TOO_CLOSE && not time_based_event
                    then do
                    --     /* See Note [CV_TOO_CLOSE]
                    --        No solving was required; just set the time t manually and continue
                    --        as if solving succeeded. */
                    --     DEBUG("Got CV_TOO_CLOSE; no solving was required; proceeding to t = %.17g", next_stop_time);
-                   --     t = next_stop_time;
                      pure (next_stop_time, flag)
-                   --   }
-                   --   else
                    else do
                      s <- get
-                   --   if (t == next_stop_time && t == t_start && flag == CV_ROOT_RETURN && !time_based_event) {
                      if t == next_stop_time && t == s.t_start && flag == CV_ROOT_RETURN && not time_based_event
                      then do
                    --     /* See Note [CV_TOO_CLOSE]
@@ -290,29 +238,16 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                    --        Pretend that the root didn't happen, lest we keep handling it
                    --        forever. */
                    --     DEBUG("Got a root but t == t_start == next_stop_time; pretending it didn't happen");
-                   --     flag = CV_SUCCESS;
                        pure (t, CV_SUCCESS)
-                   --   }
-                   --   else
                      else do
-                   --   if (!(flag == CV_TOO_CLOSE && time_based_event) &&
-                   --     check_flag(&flag, "CVode", 1, report_error)) {
-
                        if not (flag == CV_TOO_CLOSE && time_based_event) && flag < 0
                        then do
-                         -- TODO:  report an error
-        
-                   --     N_Vector ele = N_VNew_Serial(c_dim, sunctx);
-                   --     N_Vector weights = N_VNew_Serial(c_dim, sunctx);
                    --     TODO: check this code, that's not terminated, it is
                    --     unclear what it does, and it error reporting for
                    --     failures in vector had never been written
                          liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \ele -> do
                            liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \weights -> do
-                      --     flag = CVodeGetEstLocalErrors(cvode_mem, ele);
                             flag <- liftIO $ cCVodeGetEstLocalErrors cvode_mem ele
-                      --     // CV_SUCCESS is defined is 0, so we OR the flags
-                      --     flag = flag || CVodeGetErrWeights(cvode_mem, weights);
                             flag' <- liftIO $ cCVodeGetErrWeights cvode_mem weights
                       --     if (flag == CV_SUCCESS) {
                       --       double *arr_ptr = N_VGetArrayPointer(ele);
@@ -323,23 +258,13 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
         
                       --       ($vec-ptr:(int *c_local_error_set))[0] = 1;
                       --     }
-                      --     N_VDestroy(ele);
-                      --     N_VDestroy(weights);
-                      --     return 45;
-                           -- TODO: this is weird, that's an early exit... Better raising for now
                             when (flag == CV_SUCCESS && flag' == CV_SUCCESS) $ do
-                               error "BEURK BEURK"
+                               error "TODO: do this part, but I don't really understand what it does"
                             liftIO $ throwIO (ReturnCode 45)
                         else
                           pure (t, flag)
-                   --   }
-                   
                    
                    --   /* Store the results for Haskell */
-                   --   ($vec-ptr:(double *c_output_mat))[output_ind * (c_dim + 1) + 0] = t;
-                   --   for (j = 0; j < c_dim; j++) {
-                   --     ($vec-ptr:(double *c_output_mat))[output_ind * (c_dim + 1) + (j + 1)] = NV_Ith_S(y,j);
-                   --   }
                    s <- get
                    VSM.write c_output_mat (s.output_ind * (fromIntegral c_dim + 1) + 0) t
                    let
@@ -349,56 +274,29 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                           liftIO $ VSM.write c_output_mat (s.output_ind * fromIntegral (c_dim + 1) + (fromIntegral j + 1)) =<< cNV_Ith_S' y (fromIntegral j)
                           go (j + 1)
                    go 0
-       
         
-                   --   $fun:(void (*c_ontimepoint)(int))(output_ind);
                    s <- get
                    liftIO $ c_ontimepoint (fromIntegral s.output_ind)
-
-                   
-                   --   output_ind++;
                    modify $ \s -> s { output_ind = s.output_ind + 1}
 
                    s <- get
-                   --   ($vec-ptr:(int *c_n_rows))[0] = output_ind;
                    VSM.write  c_n_rows 0 (fromIntegral s.output_ind)
        
-                   --   if (root_based_event || time_based_event) {
                    when (root_based_event || time_based_event) $ do
                      --     DEBUG("Got an event");
-                     --     if (event_ind >= $(int c_max_events)) {
+                     when (fromIntegral s.event_ind >= c_max_events) $ do
+                     --       DEBUG("Maximum number of events reached");
                      --       /* We reached the maximum number of events.
                      --          Either the maximum number of events is set to 0,
                      --          or there's a bug in our code below. In any case return an error.
                      --       */
-                     --       DEBUG("Maximum number of events reached");
-                     --       return 8630;
-                     --     }
-                     when (fromIntegral s.event_ind >= c_max_events) $ do
                        liftIO $ throwIO (ReturnCode 8630)
-                       -- error "Maximum number of events reached"
         
                      --     /* How many events triggered? */
-                     --     int n_events_triggered = 0;
-                     --     int *c_root_info = ($vec-ptr:(int *c_root_info));
-                     --     if (root_based_event) {
-                     --       DEBUG("Handling root-based events");
-                     --       flag = CVodeGetRootInfo(cvode_mem, c_root_info);
-                     --       if (check_flag(&flag, "CVodeGetRootInfo", 1, report_error)) return 2829;
-                     --       for (i = 0; i < $(int c_n_event_specs); i++) {
-                     --         int ev = c_root_info[i];
-                     --         int req_dir = ($vec-ptr:(const int *c_requested_event_direction))[i];
-                     --         if (ev != 0 && ev * req_dir >= 0) {
-                     --           /* After the above call to CVodeGetRootInfo, c_root_info has an
-                     --           entry per EventSpec. Here we reuse the same array but convert it
-                     --           into one that contains indices of triggered events. */
-                     --           c_root_info[n_events_triggered++] = i;
-                     --         }
-                     --       }
-                     --     }
                      n_events_triggered <- if not root_based_event
                      then pure 0
                      else do
+                     --       DEBUG("Handling root-based events");
                        liftIO $ VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
                          flag <- cCVodeGetRootInfo cvode_mem c_root_info_ptr
                          when (flag < 0) $ do
@@ -412,29 +310,22 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
 
                                if ev /= 0 && ev * req_dir >= 0
                                then do
+                     --           /* After the above call to CVodeGetRootInfo, c_root_info has an
+                     --           entry per EventSpec. Here we reuse the same array but convert it
+                     --           into one that contains indices of triggered events. */
+                     --           c_root_info[n_events_triggered++] = i;
                                  VSM.write c_root_info n_events_triggered i
                                  go (i + 1) (n_events_triggered + 1)
                                else do
                                  go (i + 1) n_events_triggered
                          go 0 0
         
-                     --     /* Should we stop the solver? */
-                     --     int stop_solver = 0;
-                     --     /* Should we record the state before/after the event in the output matrix? */
-                     --     int record_events = 0;
-                     --     if (n_events_triggered > 0 || time_based_event) {
-                     --       /* Update the state with the supplied function */
-                     --       DEBUG("Calling the event handler; n_events_triggered = %d; time_based_event = %d", n_events_triggered, time_based_event);
-                     --       int error = $fun:(int (* c_apply_event) (int, int*, double, N_Vector y, N_Vector z, int*, int*))(n_events_triggered, c_root_info, t, y, y, &stop_solver, &record_events);
-        
-                     --       // If the event handled failed internally, we stop the solving
-                     --       if(error)
-                     --         break;
-                     --     }
                      (record_events, stop_solver) <-
                        if (n_events_triggered > 0 || time_based_event)
                        then do
                          (stop_solver, record_events, err) <- liftIO $ alloca $ \stop_solver_ptr -> alloca $ \record_event_ptr -> do
+                     --       /* Update the state with the supplied function */
+                     --       DEBUG("Calling the event handler; n_events_triggered = %d; time_based_event = %d", n_events_triggered, time_based_event);
                              err <- VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
                                err <- c_apply_event (fromIntegral n_events_triggered) c_root_info_ptr t (coerce y) (coerce y) stop_solver_ptr record_event_ptr
                                pure err
@@ -442,15 +333,15 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                              record_event <- peek record_event_ptr
                              pure (stop_solver, record_event, err)
 
+                     --       // If the event handled failed internally, we stop the solving
                          when (err /= 0) $ do
-                           -- TODO: gain, insane
+                           -- TODO: gain, insane. The previous implementation was just "breaking" here, leading to CV_SUCCESS
                            liftIO $ throwIO $ ReturnCode (fromIntegral CV_SUCCESS)
 
                          pure (record_events, stop_solver)
                        else
                          pure (0, 0)
         
-                     --     if (record_events) {
                      if record_events /= 0
                      then do
                        --       DEBUG("Recording events");
@@ -458,21 +349,11 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                        --          then we don't want to duplicate the initial row, so rewind it back.
                        --          Note that we do this only in the branch where record_events is true;
                        --          otherwise we may end up erasing the initial row (see below). */
-                       --       if (t == ($vec-ptr:(double *c_sol_time))[0] && output_ind == 2) {
-                       --         output_ind--;
-                       --         /* c_n_rows will be updated below anyway */
-                       --       }
                        s <- get
                        when (t == c_sol_time VS.! 0 && s.output_ind == 2) $ do
+                       --         /* c_n_rows will be updated below anyway */
                          modify $ \s -> s { output_ind = s.output_ind - 1 }
 
-                       --       ($vec-ptr:(double *c_output_mat))[output_ind * (c_dim + 1) + 0] = t;
-                       --       for (j = 0; j < c_dim; j++) {
-                       --         ($vec-ptr:(double *c_output_mat))[output_ind * (c_dim + 1) + (j + 1)] = NV_Ith_S(y,j);
-                       --       }
-                       --
-                       --
-                       --
                        s <- get
                        VSM.write c_output_mat (s.output_ind * (fromIntegral c_dim + 1) + 0) t
                        let
@@ -484,74 +365,42 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                        go 0
        
 
-                       --       $fun:(void (*c_ontimepoint)(int))(output_ind);
                        s <- get
                        liftIO $ c_ontimepoint $ fromIntegral s.output_ind
                        modify $ \s -> s { event_ind = s.event_ind + 1, output_ind = s.output_ind + 1 }
                        s <- get
                        VSM.write c_n_rows 0 (fromIntegral s.output_ind)
-        
-                       --       event_ind++;
-                       --       output_ind++;
-                       --       ($vec-ptr:(int *c_n_rows))[0] = output_ind;
-                       --     } else {
                      else do
+                        --       /* Remove the saved row — unless the event time also coincides with a requested time point */
                         when (t /= ti) $ do
                             modify $ \s -> s { output_ind = s.output_ind - 1 }
                             s <- get
                             VSM.write c_n_rows 0 (fromIntegral s.output_ind)
-                        --       /* Remove the saved row — unless the event time also coincides with a requested time point */
-                        --       if (t != ti) {
-                        --         output_ind--;
-                        --         ($vec-ptr:(int *c_n_rows))[0] = output_ind;
-                        --       }
-                        --     }
-                        --
                      s <- get
                      stop_solver <- if (fromIntegral s.event_ind >= c_max_events)
                      then do
+                     --       DEBUG("Reached max_events; returning");
                        VSM.write c_diagnostics 10 1
                        pure 1
                      else pure stop_solver
-                     --     if (event_ind >= $(int c_max_events)) {
-                     --       DEBUG("Reached max_events; returning");
-                     --       ($vec-ptr:(sunindextype *c_diagnostics))[10] = 1;
-                     --       stop_solver = 1;
-                     --     }
-                     --     if (stop_solver) {
-                     --       DEBUG("Stopping the hmatrix-sundials solver as requested");
-                     --       goto finish;
-                     --     }
                      when (stop_solver /= 0) $ do
+                     --       DEBUG("Stopping the hmatrix-sundials solver as requested");
                         s <- get 
                         liftIO $ throwIO $ Finish s
        
                      when (n_events_triggered > 0 || time_based_event) $ do
-                       liftIO $ cCVodeReInit cvode_mem t y
-                     --     if (n_events_triggered > 0 || time_based_event) {
                      --       DEBUG("Re-initializing the system");
-                     --       flag = CVodeReInit(cvode_mem, t, y);
-                     --       if (check_flag(&flag, "CVodeReInit", 1, report_error)) return(1576);
-                     --     }
-                     --   }
-                     --
+                       liftIO $ cCVodeReInit cvode_mem t y
 
                    when (t == ti) $ do
                      modify $ \s -> s {input_ind = s.input_ind + 1 }
                      s <- get
                      when (s.input_ind >= fromIntegral c_n_sol_times) $ do
-
                        s <- get 
                        liftIO $ throwIO $ Finish s
 
                    modify $ \s -> s {t_start = t}
                    loop
-                   --   if (t == ti) {
-                   --     if (++input_ind >= $(int c_n_sol_times))
-                   --       goto finish;
-                   --   }
-                   --   t_start = t;
-                   -- }
               resM <- try $ execStateT loop init_loop
 
               case resM of
@@ -800,7 +649,7 @@ withSUNLinSol_KLU vec mat sunctx errCode f = do
 foreign import ccall "CVode" cCVode :: CVodeMem -> CDouble -> N_Vector -> Ptr CDouble -> CInt -> IO CInt
 foreign import ccall "CVodeReInit" cCVodeReInit :: CVodeMem -> CDouble -> N_Vector -> IO ()
 foreign import ccall "CVodeGetRootInfo" cCVodeGetRootInfo :: CVodeMem -> Ptr CInt -> IO CInt
-foreign import ccall "CVodeSetJacFn" cCVodeSetJacFn :: CVodeMem -> FunPtr OdeJacobianCType -> IO () 
+foreign import ccall "CVodeSetJacFn" cCVodeSetJacFn :: CVodeMem -> FunPtr OdeJacobianCType -> IO CInt
 
 
 -- | Opaque
