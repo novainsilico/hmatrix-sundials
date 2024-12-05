@@ -30,6 +30,7 @@ import Data.Void
 import Foreign.C
 import Data.Maybe (fromMaybe)
 import Control.Monad.State
+import Debug.Trace (traceShow, traceShowId)
 
 -- | Available methods for CVode
 data CVMethod = ADAMS
@@ -266,6 +267,8 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
         let
           loop :: StateT LoopState IO ()
           loop = do
+             s <- get
+             liftIO $ print ("loop",s)
              -- while (1) {
              --    // The solver will run until it terminates or receive a signal to stop by the
              --    // way of a non null value in *ptrSTop
@@ -284,7 +287,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --   TODO: remove the stop code, this is NOT required anymore, the exception will pop HERE
              --   double ti = ($vec-ptr:(double *c_sol_time))[input_ind];
              s <- get
-             let ti = fromMaybe (error "titi") $ c_sol_time VS.!? s.input_ind
+             let ti = fromMaybe (error "titi") $ traceShowId c_sol_time VS.!? s.input_ind
 
              --   double next_time_event = ($fun:(double (*c_next_time_event)()))();
              next_time_event <- liftIO c_next_time_event
@@ -315,8 +318,10 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
              --   DEBUG("Main loop iteration: t = %.17g (%a), next time point (ti) = %.17g, next time event = %.17g", t, ti, next_time_event);
              --   flag = CVode(cvode_mem, next_stop_time, y, &t, CV_NORMAL); /* call integrator */
              (t, flag) <- liftIO $ alloca $ \t_ptr -> do
+               print "cv"
                flag <- cCVode cvode_mem next_stop_time y t_ptr CV_NORMAL
                t <- peek t_ptr
+               print ("/cv", t)
                pure (t, flag)
 
              --   DEBUG("CVode returned %d; now t = %.17g\n", flag, t);
@@ -559,37 +564,38 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                   --         ($vec-ptr:(int *c_n_rows))[0] = output_ind;
                   --       }
                   --     }
-                  s <- get
-                  stop_solver <- if (fromIntegral s.event_ind >= c_max_events)
-                  then do
-                    VSM.write c_diagnostics 10 1
-                    pure 1
-                  else pure stop_solver
-                  --     if (event_ind >= $(int c_max_events)) {
-                  --       DEBUG("Reached max_events; returning");
-                  --       ($vec-ptr:(sunindextype *c_diagnostics))[10] = 1;
-                  --       stop_solver = 1;
-                  --     }
-                  --     if (stop_solver) {
-                  --       DEBUG("Stopping the hmatrix-sundials solver as requested");
-                  --       goto finish;
-                  --     }
-                  when (stop_solver /= 0) $ do
-                     s <- get 
-                     liftIO $ throwIO $ Finish s
-  
-                  when (n_events_triggered > 0 || time_based_event) $ do
-                    liftIO $ cCVodeReInit cvode_mem t y
-                  --     if (n_events_triggered > 0 || time_based_event) {
-                  --       DEBUG("Re-initializing the system");
-                  --       flag = CVodeReInit(cvode_mem, t, y);
-                  --       if (check_flag(&flag, "CVodeReInit", 1, report_error)) return(1576);
-                  --     }
-                  --   }
                   --
+               s <- get
+               stop_solver <- if (fromIntegral s.event_ind >= c_max_events)
+               then do
+                 VSM.write c_diagnostics 10 1
+                 pure 1
+               else pure stop_solver
+               --     if (event_ind >= $(int c_max_events)) {
+               --       DEBUG("Reached max_events; returning");
+               --       ($vec-ptr:(sunindextype *c_diagnostics))[10] = 1;
+               --       stop_solver = 1;
+               --     }
+               --     if (stop_solver) {
+               --       DEBUG("Stopping the hmatrix-sundials solver as requested");
+               --       goto finish;
+               --     }
+               when (stop_solver /= 0) $ do
+                  s <- get 
+                  liftIO $ throwIO $ Finish s
+ 
+               when (n_events_triggered > 0 || time_based_event) $ do
+                 liftIO $ cCVodeReInit cvode_mem t y
+               --     if (n_events_triggered > 0 || time_based_event) {
+               --       DEBUG("Re-initializing the system");
+               --       flag = CVodeReInit(cvode_mem, t, y);
+               --       if (check_flag(&flag, "CVodeReInit", 1, report_error)) return(1576);
+               --     }
+               --   }
+               --
 
              s <- get
-             when (t == ti) $ do
+             when (traceShow (t, ti) t == ti) $ do
                modify $ \s -> s {input_ind = s.input_ind + 1 }
                s <- get
                when (s.input_ind >= fromIntegral c_n_sol_times) $ do
