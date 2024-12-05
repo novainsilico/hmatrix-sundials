@@ -134,7 +134,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
       VSM.write c_diagnostics 10 0
   
       -- y = N_VNew_Serial(c_dim, sunctx); /* Create serial vector for solution */
-      y <- cN_VNew_Serial c_dim sunctx
+      y <- unsafeN_VNew_Serial c_dim sunctx
       -- TODO: error reporting
       -- if (check_flag((void *)y, "N_VNew_Serial", 0, report_error)) return 6896;
 
@@ -164,7 +164,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
         cCVodeSetUserData cvode_mem c_rhs_userdata
   
         -- tv = N_VNew_Serial(c_dim, sunctx); /* Create serial vector for absolute tolerances */
-        tv <- cN_VNew_Serial c_dim sunctx
+        tv <- unsafeN_VNew_Serial c_dim sunctx
         -- if (check_flag((void *)tv, "N_VNew_Serial", 0, report_error)) return 6471;
         -- /* Specify tolerances */
         -- for (i = 0; i < c_dim; i++) {
@@ -359,30 +359,30 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
                    -- TODO:  report an error
   
              --     N_Vector ele = N_VNew_Serial(c_dim, sunctx);
-                   ele <- liftIO $ cN_VNew_Serial c_dim sunctx
              --     N_Vector weights = N_VNew_Serial(c_dim, sunctx);
-                   weights <- liftIO $ cN_VNew_Serial c_dim sunctx
-             --     flag = CVodeGetEstLocalErrors(cvode_mem, ele);
-                   flag <- liftIO $ cCVodeGetEstLocalErrors cvode_mem ele
-             --     // CV_SUCCESS is defined is 0, so we OR the flags
-             --     flag = flag || CVodeGetErrWeights(cvode_mem, weights);
-                   flag' <- liftIO $ cCVodeGetErrWeights cvode_mem weights
-             --     if (flag == CV_SUCCESS) {
-             --       double *arr_ptr = N_VGetArrayPointer(ele);
-             --       memcpy(($vec-ptr:(double *c_local_error)), arr_ptr, c_dim * sizeof(double));
+                   liftIO $ withNVector_Serial c_dim sunctx $ \ele -> do
+                     liftIO $ withNVector_Serial c_dim sunctx $ \weights -> do
+                --     flag = CVodeGetEstLocalErrors(cvode_mem, ele);
+                      flag <- liftIO $ cCVodeGetEstLocalErrors cvode_mem ele
+                --     // CV_SUCCESS is defined is 0, so we OR the flags
+                --     flag = flag || CVodeGetErrWeights(cvode_mem, weights);
+                      flag' <- liftIO $ cCVodeGetErrWeights cvode_mem weights
+                --     if (flag == CV_SUCCESS) {
+                --       double *arr_ptr = N_VGetArrayPointer(ele);
+                --       memcpy(($vec-ptr:(double *c_local_error)), arr_ptr, c_dim * sizeof(double));
   
-             --       arr_ptr = N_VGetArrayPointer(weights);
-             --       memcpy(($vec-ptr:(double *c_var_weight)), arr_ptr, c_dim * sizeof(double));
+                --       arr_ptr = N_VGetArrayPointer(weights);
+                --       memcpy(($vec-ptr:(double *c_var_weight)), arr_ptr, c_dim * sizeof(double));
   
-             --       ($vec-ptr:(int *c_local_error_set))[0] = 1;
-             --     }
-             --     N_VDestroy(ele);
-             --     N_VDestroy(weights);
-             --     return 45;
-                  -- TODO: this is weird, that's an early exit... Better raising for now
-                   when (flag == CV_SUCCESS && flag' == CV_SUCCESS) $ do
-                      error "BEURK BEURK"
-                   liftIO $ throwIO (ReturnCode 45)
+                --       ($vec-ptr:(int *c_local_error_set))[0] = 1;
+                --     }
+                --     N_VDestroy(ele);
+                --     N_VDestroy(weights);
+                --     return 45;
+                     -- TODO: this is weird, that's an early exit... Better raising for now
+                      when (flag == CV_SUCCESS && flag' == CV_SUCCESS) $ do
+                         error "BEURK BEURK"
+                      liftIO $ throwIO (ReturnCode 45)
                   else
                     pure (t, flag)
              --   }
@@ -720,6 +720,13 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
             -- SUNContext_Free(&sunctx);
   
             -- return CV_SUCCESS;
+            
+            -- TODO: this should be handled by "with"
+            -- unsafeN_VDestroy y
+            -- unsafeN_VDestroy tv
+
+            -- SUNLinSolFree ls
+            -- SUNMatDestroy a
             pure CV_SUCCESS
    --  |]
   
@@ -768,19 +775,19 @@ withSunContext cont = do
   alloca $ \ptr -> do
     let
       create = do
-        errCode <- cSUNContext_Create 0 ptr
+        errCode <- unsafeSUNContext_Create 0 ptr
         when (errCode /= 0) $ do
           errMsg <- cSUNGetErrMsg errCode
           msg <- peekCString errMsg
           error msg
         pure ()
-      destroy = cSUNContext_Free ptr
+      destroy = unsafeSUNContext_Free ptr
     bracket_ create destroy  $ do
       sunctx <- peek ptr
       cont sunctx
 
-foreign import ccall "SUNContext_Create" cSUNContext_Create :: Int -> Ptr SunContext -> IO CInt
-foreign import ccall "SUNContext_Free" cSUNContext_Free :: Ptr SunContext -> IO CInt
+foreign import ccall "SUNContext_Create" unsafeSUNContext_Create :: Int -> Ptr SunContext -> IO CInt
+foreign import ccall "SUNContext_Free" unsafeSUNContext_Free :: Ptr SunContext -> IO CInt
 
 -- | An opaque pointer to a CVodeMem
 newtype CVodeMem = CVodeMem (Ptr Void)
@@ -790,7 +797,7 @@ withCVodeMem :: CInt -> SunContext -> (CVodeMem -> IO a) -> IO a
 withCVodeMem method suncontext f = do
     let
       create = do
-        res@(CVodeMem ptr) <- cCVodeCreate method suncontext
+        res@(CVodeMem ptr) <- unsafeCVodeCreate method suncontext
         if ptr == nullPtr
         then
           error "null ptr when creating cvmem"
@@ -799,18 +806,23 @@ withCVodeMem method suncontext f = do
       destroy p = do
         alloca $ \ptrPtr -> do
           poke ptrPtr p
-          cCVodeFree ptrPtr
+          unsafeCVodeFree ptrPtr
     bracket create destroy f
 
-foreign import ccall "CVodeCreate" cCVodeCreate :: CInt -> SunContext -> IO CVodeMem
--- TODO: check 
-foreign import ccall "CVodeFree" cCVodeFree :: Ptr CVodeMem -> IO ()
+foreign import ccall "CVodeCreate" unsafeCVodeCreate :: CInt -> SunContext -> IO CVodeMem
+foreign import ccall "CVodeFree" unsafeCVodeFree :: Ptr CVodeMem -> IO ()
 foreign import ccall "CVodeInit" cCVodeInit :: CVodeMem -> FunPtr OdeRhsCType -> SunRealType -> N_Vector -> IO CInt
 
 -- | An opaque pointer to an N_Vector
 newtype N_Vector = N_Vector (Ptr Void)
 
-foreign import ccall "N_VNew_Serial" cN_VNew_Serial :: SunIndexType -> SunContext -> IO N_Vector
+foreign import ccall "N_VNew_Serial" unsafeN_VNew_Serial :: SunIndexType -> SunContext -> IO N_Vector
+foreign import ccall "N_VDestroy" unsafeN_VDestroy :: N_Vector -> IO ()
+
+withNVector_Serial :: SunIndexType -> SunContext -> (N_Vector -> IO a) -> IO a
+withNVector_Serial t suncontext f = do
+  bracket (unsafeN_VNew_Serial t suncontext) unsafeN_VDestroy f
+
 
 cNV_Ith_S (N_Vector ptr) i v = do
   qtr <- getContentPtr ptr
