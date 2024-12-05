@@ -18,20 +18,20 @@ where
 import Control.Exception
 import Control.Monad (when)
 import Control.Monad.State
+import Data.Bool
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Storable.Mutable as VSM
 import Data.Void
 import Foreign
 import Foreign.C
-import Foreign.C.Types
-import Foreign.Ptr
 import GHC.Generics
 import GHC.Prim
 import GHC.Stack
 import Katip
 import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
+import Text.Printf (printf)
 
 -- | Available methods for CVode
 data CVMethod
@@ -44,12 +44,20 @@ instance IsMethod CVMethod where
   methodToInt BDF = cV_BDF
   methodType _ = Implicit
 
+-- Tries to copy the previous semantic in C when we had:
 data ReturnCode
-  = ReturnCode Int
-  | ReturnCodeWithMessage String Int
-  | Finish LoopState
+  = -- return, with error code, skipping finish (diagnostics and cleanup)
+    ReturnCode Int
+  | -- return with log message, skipping finish (diags and cleanup)
+    ReturnCodeWithMessage String Int
+  | -- "goto" finish (do diag and cleanup)
+    Finish LoopState
+  | -- break the loop, hence go to finish (do diag and cleanup)
+    Break LoopState
   deriving (Exception, Show)
 
+-- | The loop state, most could be just carried by recursive function call, but
+-- the C semantic was kinda interleaved, so doing that for now.
 data LoopState = LoopState
   { -- output_ind tracks the current row into the c_output_mat matrix.
     -- if differs from input_ind because of the extra rows corresponding to events.
@@ -81,7 +89,7 @@ solveC :: Ptr CInt -> CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CI
 solveC ptrStop CConsts {..} CVars {..} log_env =
   let report_error = reportErrorWithKatip log_env
       report_error_new_api = wrapErrorNewApi (reportErrorWithKatip log_env)
-      debug = debugMsgWithKatip log_env
+      debug s = liftIO (debugMsgWithKatip log_env s)
    in do
         withSunContext $ \sunctx -> do
           let init_loop =
@@ -204,22 +212,22 @@ solveC ptrStop CConsts {..} CVars {..} log_env =
                         -- TODO: == with float sucks, considering that
                         -- next_time_event could return a Maybe
                         when (next_time_event == -1) $ do
-                          -- TODO: this is completly weird, but previous code was doing that...
-                          liftIO $ throwIO (ReturnCode $ fromIntegral CV_SUCCESS)
+                          s <- get
+                          liftIO $ throwIO $ Break s
 
                         when (next_time_event < s.t_start) $ do
                           s <- get
+                          debug $ printf "time-based event is in the past: next event time = %.4f while we are at %.4f" (coerce next_time_event :: Double) (coerce s.t_start :: Double)
                           liftIO $ throwIO $ Finish s
-                        --     snprintf(msg, msg_size, "time-based event is in the past: next event time = %.4f while we are at %.4f", next_time_event, t_start);
 
                         let next_stop_time = min ti next_time_event
-                        --   DEBUG("Main loop iteration: t = %.17g (%a), next time point (ti) = %.17g, next time event = %.17g", t, ti, next_time_event);
+                        debug $ printf "Main loop iteration: t = %.17g (%a), next time point (ti) = %.17g, next time event = %.17g" (coerce s.t_start :: Double) (coerce ti :: Double) (coerce next_time_event :: Double)
                         (t, flag) <- liftIO $ alloca $ \t_ptr -> do
                           flag <- cCVode cvode_mem next_stop_time y t_ptr CV_NORMAL
                           t <- peek t_ptr
                           pure (t, flag)
 
-                        --   DEBUG("CVode returned %d; now t = %.17g\n", flag, t);
+                        debug $ printf "CVode returned %d; now t = %.17g\n" (fromIntegral flag :: Int) (coerce t :: Double)
                         let root_based_event = flag == CV_ROOT_RETURN
                         let time_based_event = t == next_time_event
                         (t, flag) <-
@@ -228,7 +236,7 @@ solveC ptrStop CConsts {..} CVars {..} log_env =
                               --     /* See Note [CV_TOO_CLOSE]
                               --        No solving was required; just set the time t manually and continue
                               --        as if solving succeeded. */
-                              --     DEBUG("Got CV_TOO_CLOSE; no solving was required; proceeding to t = %.17g", next_stop_time);
+                              debug $ printf "Got CV_TOO_CLOSE; no solving was required; proceeding to t = %.17g" (coerce next_stop_time :: Double)
                               pure (next_stop_time, flag)
                             else do
                               s <- get
@@ -239,7 +247,7 @@ solveC ptrStop CConsts {..} CVars {..} log_env =
                                   --        get CV_TOO_CLOSE.
                                   --        Pretend that the root didn't happen, lest we keep handling it
                                   --        forever. */
-                                  --     DEBUG("Got a root but t == t_start == next_stop_time; pretending it didn't happen");
+                                  debug $ ("Got a root but t == t_start == next_stop_time; pretending it didn't happen" :: String)
                                   pure (t, CV_SUCCESS)
                                 else do
                                   if not (flag == CV_TOO_CLOSE && time_based_event) && flag < 0
@@ -283,9 +291,9 @@ solveC ptrStop CConsts {..} CVars {..} log_env =
                         VSM.write c_n_rows 0 (fromIntegral s.output_ind)
 
                         when (root_based_event || time_based_event) $ do
-                          --     DEBUG("Got an event");
+                          debug ("Got an event")
                           when (fromIntegral s.event_ind >= c_max_events) $ do
-                            --       DEBUG("Maximum number of events reached");
+                            debug ("Maximum number of events reached")
                             --       /* We reached the maximum number of events.
                             --          Either the maximum number of events is set to 0,
                             --          or there's a bug in our code below. In any case return an error.
@@ -297,7 +305,7 @@ solveC ptrStop CConsts {..} CVars {..} log_env =
                             if not root_based_event
                               then pure 0
                               else do
-                                --       DEBUG("Handling root-based events");
+                                debug ("Handling root-based events")
                                 liftIO $ VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
                                   flag <- cCVodeGetRootInfo cvode_mem c_root_info_ptr
                                   when (flag < 0) $ do
@@ -325,7 +333,7 @@ solveC ptrStop CConsts {..} CVars {..} log_env =
                               then do
                                 (stop_solver, record_events, err) <- liftIO $ alloca $ \stop_solver_ptr -> alloca $ \record_event_ptr -> do
                                   --       /* Update the state with the supplied function */
-                                  --       DEBUG("Calling the event handler; n_events_triggered = %d; time_based_event = %d", n_events_triggered, time_based_event);
+                                  debug $ printf "Calling the event handler; n_events_triggered = %d; time_based_event = %d" n_events_triggered (bool (0 :: Int) 1 time_based_event)
                                   err <- VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
                                     err <- c_apply_event (fromIntegral n_events_triggered) c_root_info_ptr t (coerce y) (coerce y) stop_solver_ptr record_event_ptr
                                     pure err
@@ -335,15 +343,15 @@ solveC ptrStop CConsts {..} CVars {..} log_env =
 
                                 --       // If the event handled failed internally, we stop the solving
                                 when (err /= 0) $ do
-                                  -- TODO: gain, insane. The previous implementation was just "breaking" here, leading to CV_SUCCESS
-                                  liftIO $ throwIO $ ReturnCode (fromIntegral CV_SUCCESS)
+                                  s <- get
+                                  liftIO $ throwIO $ Break s
 
                                 pure (record_events, stop_solver)
                               else pure (0, 0)
 
                           if record_events /= 0
                             then do
-                              --       DEBUG("Recording events");
+                              debug ("Recording events")
                               --       /* A corner case: if the time-based event triggers at the very beginning,
                               --          then we don't want to duplicate the initial row, so rewind it back.
                               --          Note that we do this only in the branch where record_events is true;
@@ -377,17 +385,17 @@ solveC ptrStop CConsts {..} CVars {..} log_env =
                           stop_solver <-
                             if (fromIntegral s.event_ind >= c_max_events)
                               then do
-                                --       DEBUG("Reached max_events; returning");
+                                debug ("Reached max_events; returning")
                                 VSM.write c_diagnostics 10 1
                                 pure 1
                               else pure stop_solver
                           when (stop_solver /= 0) $ do
-                            --       DEBUG("Stopping the hmatrix-sundials solver as requested");
+                            debug ("Stopping the hmatrix-sundials solver as requested")
                             s <- get
                             liftIO $ throwIO $ Finish s
 
                           when (n_events_triggered > 0 || time_based_event) $ do
-                            --       DEBUG("Re-initializing the system");
+                            debug ("Re-initializing the system")
                             liftIO $ cCVodeReInit cvode_mem t y
 
                         when (t == ti) $ do
@@ -401,6 +409,7 @@ solveC ptrStop CConsts {..} CVars {..} log_env =
                         loop
                   resM <- try $ execStateT loop init_loop
 
+                  debug ("Cleaning up before returning from the hmatrix-sundials solver")
                   case resM of
                     Left (ReturnCode c)
                       | c == fromIntegral CV_SUCCESS -> pure CV_SUCCESS
@@ -409,10 +418,10 @@ solveC ptrStop CConsts {..} CVars {..} log_env =
                       | c == fromIntegral CV_SUCCESS -> pure CV_SUCCESS
                       | otherwise -> pure $ (fromIntegral c)
                     Right finalState -> end cvode_mem finalState
+                    Left (Break finalState) -> end cvode_mem finalState
                     Left (Finish finalState) -> end cvode_mem finalState
   where
     end cvode_mem finalState = do
-      -- DEBUG("Cleaning up before returning from the hmatrix-sundials solver");
       -- TODO: clean the input diagnostics logic so we can just
       -- export the struct instead of writing on arbitrary offsets.
 

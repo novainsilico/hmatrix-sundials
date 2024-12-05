@@ -307,9 +307,8 @@ reportErrorWithKatip log_env err_code c_mod_name c_func_name c_msg _userdata = d
   flip runReaderT log_env . unKatipT $ do
     logF errCtx "sundials" severity (logStr msg)
 
-debugMsgWithKatip :: LogEnv -> CString -> IO ()
-debugMsgWithKatip log_env cstr = do
-  text <- cstringToText cstr
+debugMsgWithKatip :: LogEnv -> String -> IO ()
+debugMsgWithKatip log_env text = do
   flip runReaderT log_env . unKatipT $ do
     logF () "hmatrix-sundials" DebugS (logStr text)
 
