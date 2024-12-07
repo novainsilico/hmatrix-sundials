@@ -129,6 +129,7 @@ solveC ptrStop CConsts{..} CVars{..} log_env =
   if (check_flag(&flag, "CVodeInit", 1, report_error)) return(1960);
 
   /* Set the error handler */
+  SUNContext_ClearErrHandlers(sunctx);
 
   SUNErrHandlerFn report_error_new_api = (SUNErrHandlerFn) $fun:(void (*report_error_new_api)(int,const char*, const char*, const char*, int, void*, void *));
   flag = SUNContext_PushErrHandler(sunctx, report_error_new_api, NULL);
