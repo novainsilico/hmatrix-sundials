@@ -2,6 +2,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE EmptyDataDecls #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Numeric.Sundials.Foreign
   ( getDataFromContents
@@ -59,6 +60,20 @@ module Numeric.Sundials.Foreign
   , kVAERNO_7_4_5
   , aRK548L2SA_DIRK_8_4_5
   , mIN_DIRK_NUM
+  , pattern CSC_MAT
+  , pattern ARKODE_MIN_DIRK_NUM
+
+  , pattern CV_NORMAL
+  , pattern CV_ROOT_RETURN
+  , pattern CV_SUCCESS
+  , pattern CV_TOO_CLOSE
+
+  , pattern ARK_NORMAL
+  , pattern ARK_ROOT_RETURN
+  , pattern ARK_SUCCESS
+  , pattern ARK_TOO_CLOSE
+
+  , getContentPtr, getData
   ) where
 
 import           Foreign
@@ -349,3 +364,21 @@ vERNER_8_5_6 :: CInt
 vERNER_8_5_6 = #const ARKODE_VERNER_8_5_6
 fEHLBERG_13_7_8 :: CInt
 fEHLBERG_13_7_8 = #const ARKODE_FEHLBERG_13_7_8
+
+pattern CSC_MAT :: CInt
+pattern CSC_MAT = #const CSC_MAT
+
+pattern CV_NORMAL, CV_SUCCESS, CV_ROOT_RETURN, CV_TOO_CLOSE :: CInt
+pattern CV_NORMAL = #const CV_NORMAL
+pattern CV_SUCCESS = #const CV_SUCCESS
+pattern CV_ROOT_RETURN = #const CV_ROOT_RETURN
+pattern CV_TOO_CLOSE = #const CV_TOO_CLOSE
+
+pattern ARKODE_MIN_DIRK_NUM :: CInt
+pattern ARKODE_MIN_DIRK_NUM = #const ARKODE_MIN_DIRK_NUM
+
+pattern ARK_NORMAL, ARK_SUCCESS, ARK_ROOT_RETURN, ARK_TOO_CLOSE :: CInt
+pattern ARK_NORMAL = #const ARK_NORMAL
+pattern ARK_SUCCESS = #const ARK_SUCCESS
+pattern ARK_ROOT_RETURN = #const ARK_ROOT_RETURN
+pattern ARK_TOO_CLOSE = #const ARK_TOO_CLOSE
