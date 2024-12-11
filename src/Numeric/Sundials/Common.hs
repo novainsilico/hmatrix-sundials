@@ -17,13 +17,9 @@ import Data.Aeson
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.ByteString as BS
-import qualified Data.Map.Strict as Map
 import Control.Monad.Reader
 import GHC.Generics (Generic)
 import Foreign.ForeignPtr
-import Language.C.Types as CT
-import Language.C.Inline.Context
-import qualified Language.Haskell.TH as TH
 
 -- | A collection of variables that we allocate on the Haskell side and
 -- pass into the C code to be filled.
@@ -533,17 +529,3 @@ data CrossingDirection = Upwards | Downwards | AnyDirection
 --
 -- If there is no next time-based event, the action should return +Inf.
 newtype TimeEventSpec = TimeEventSpec (IO Double)
-
-sunTypesTable :: Map.Map TypeSpecifier TH.TypeQ
-sunTypesTable = Map.fromList
-  [
-    (TypeName "sunindextype", [t| SunIndexType |] )
-  , (TypeName "realtype",     [t| SunRealType |] )
-  , (TypeName "N_Vector",     [t| Ptr SunVector |] )
-  , (TypeName "SUNMatrix",    [t| Ptr SunMatrix |] )
-  , (TypeName "UserData",     [t| UserData |] )
-  ]
-
--- | Allows to map between Haskell and C types
-sunCtx :: Context
-sunCtx = mempty {ctxTypesTable = sunTypesTable}

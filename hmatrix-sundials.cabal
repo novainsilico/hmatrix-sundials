@@ -18,11 +18,7 @@ flag debug
 
 library
   build-depends:       base >=4.10,
-                       inline-c >=0.6,
                        vector >=0.12,
-                       template-haskell >=2.12,
-                       containers >=0.5,
-                       split >=0.2,
                        hmatrix>=0.18,
                        deepseq,
                        mtl,
@@ -53,7 +49,6 @@ library
                        RecordWildCards
                        NamedFieldPuns
                        ScopedTypeVariables
-                       TemplateHaskell
                        QuasiQuotes
                        KindSignatures
                        TypeOperators
@@ -65,7 +60,7 @@ library
                        DeriveGeneric
                        DeriveAnyClass
                        OverloadedStrings
-  ghc-options:         -Wall
+  ghc-options:         -Wall -Wunused-packages
   if flag(debug)
     -- _GNU_SOURCE is needed for asprintf
     cpp-options: -DENABLE_DEBUG -D_GNU_SOURCE
