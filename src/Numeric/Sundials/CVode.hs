@@ -102,7 +102,7 @@ solveC _ptrStop CConsts {..} CVars {..} log_env =
    in do
         -- Allocate the error reporting callback
         bracket (mkReport report_error_new_api) freeHaskellFunPtr $ \c_report_error -> do
-          withSunContext $ \sunctx -> do
+          withSUNContext $ \sunctx -> do
             let init_loop =
                   ( LoopState
                       { -- /* input_ind tracks the current index into the c_sol_time array */
@@ -177,18 +177,22 @@ solveC _ptrStop CConsts {..} CVars {..} log_env =
                   cCVodeSetNoInactiveRootWarn cvode_mem >>= check 6291
 
                   -- /* Initialize a jacobian matrix and solver */
-                  let withLinearSolver =
+                  let withLinearSolver f = do
                         if (c_sparse_jac /= 0)
-                          then \f -> do
+                          then do
                             withSUNSparseMatrix c_dim c_dim c_sparse_jac CSC_MAT sunctx 9061 $ \a -> do
-                              withSUNLinSol_KLU y a sunctx 9316 $ \ls -> f ls a
-                          else \f -> do
+                              withSUNLinSol_KLU y a sunctx 9316 $ \ls -> do
+                                -- /* Attach matrix and linear solver */
+                                cCVodeSetLinearSolver cvode_mem ls a >>= check 2625
+                                f
+                          else do
                             withSUNDenseMatrix c_dim c_dim sunctx 9316 $ \a -> do
-                              withSUNLinSol_Dense y a sunctx 9316 $ \ls -> f ls a
+                              withSUNLinSol_Dense y a sunctx 9316 $ \ls -> do
+                                -- /* Attach matrix and linear solver */
+                                cCVodeSetLinearSolver cvode_mem ls a >>= check 2625
+                                f
 
-                  withLinearSolver $ \ls a -> do
-                    -- /* Attach matrix and linear solver */
-                    cCVodeSetLinearSolver cvode_mem ls a >>= check 2625
+                  withLinearSolver $ do
                     -- /* Set the initial step size if there is one */
                     when (c_init_step_size_set /= 0) $ do
                       --   /* FIXME: We could check if the initial step size is 0 */
@@ -468,7 +472,7 @@ solveC _ptrStop CConsts {..} CVars {..} log_env =
 
       pure CV_SUCCESS
 
-foreign import ccall "SUNContext_PushErrHandler" cSUNContext_PushErrHandler :: SunContext -> FunPtr ReportErrorFnNew -> Ptr () -> IO CInt
+foreign import ccall "SUNContext_PushErrHandler" cSUNContext_PushErrHandler :: SUNContext -> FunPtr ReportErrorFnNew -> Ptr () -> IO CInt
 
 --  |]
 
@@ -506,14 +510,14 @@ foreign import ccall "SUNContext_PushErrHandler" cSUNContext_PushErrHandler :: S
    later time.
 -}
 
--- An opaque pointer to a SunContext
-newtype SunContext = SunContext (Ptr Void)
+-- An opaque pointer to a SUNContext
+newtype SUNContext = SUNContext (Ptr Void)
   deriving newtype (Storable)
 
 foreign import ccall "SUNGetErrMsg" cSUNGetErrMsg :: CInt -> IO CString
 
-withSunContext :: (HasCallStack) => (SunContext -> IO a) -> IO a
-withSunContext cont = do
+withSUNContext :: (HasCallStack) => (SUNContext -> IO a) -> IO a
+withSUNContext cont = do
   alloca $ \ptr -> do
     let create = do
           errCode <- unsafeSUNContext_Create 0 ptr
@@ -533,39 +537,39 @@ check retCode status
   | status == CV_SUCCESS = pure ()
   | otherwise = throwIO (ReturnCode retCode)
 
-foreign import ccall "SUNContext_Create" unsafeSUNContext_Create :: Int -> Ptr SunContext -> IO CInt
+foreign import ccall "SUNContext_Create" unsafeSUNContext_Create :: Int -> Ptr SUNContext -> IO CInt
 
-foreign import ccall "SUNContext_Free" unsafeSUNContext_Free :: Ptr SunContext -> IO CInt
+foreign import ccall "SUNContext_Free" unsafeSUNContext_Free :: Ptr SUNContext -> IO CInt
 
 -- | An opaque pointer to a CVodeMem
 newtype CVodeMem = CVodeMem (Ptr Void)
   deriving newtype (Storable)
 
-withCVodeMem :: (HasCallStack) => CInt -> SunContext -> Int -> (CVodeMem -> IO a) -> IO a
+withCVodeMem :: (HasCallStack) => CInt -> SUNContext -> Int -> (CVodeMem -> IO a) -> IO a
 withCVodeMem method suncontext errCode f = do
   let create = do
-        res@(CVodeMem ptr) <- unsafeCVodeCreate method suncontext
+        res@(CVodeMem ptr) <- cCVodeCreate method suncontext
         if ptr == nullPtr
           then throwIO $ ReturnCodeWithMessage "Error in cvodeCreate" errCode
           else pure res
       destroy p = do
-        with p unsafeCVodeFree
+        with p cCVodeFree
   bracket create destroy f
 
-foreign import ccall "CVodeCreate" unsafeCVodeCreate :: CInt -> SunContext -> IO CVodeMem
+foreign import ccall "CVodeCreate" cCVodeCreate :: CInt -> SUNContext -> IO CVodeMem
 
-foreign import ccall "CVodeFree" unsafeCVodeFree :: Ptr CVodeMem -> IO ()
+foreign import ccall "CVodeFree" cCVodeFree :: Ptr CVodeMem -> IO ()
 
 foreign import ccall "CVodeInit" cCVodeInit :: CVodeMem -> FunPtr OdeRhsCType -> SunRealType -> N_Vector -> IO CInt
 
 -- | An opaque pointer to an N_Vector
 newtype N_Vector = N_Vector (Ptr Void)
 
-foreign import ccall "N_VNew_Serial" unsafeN_VNew_Serial :: SunIndexType -> SunContext -> IO N_Vector
+foreign import ccall "N_VNew_Serial" unsafeN_VNew_Serial :: SunIndexType -> SUNContext -> IO N_Vector
 
 foreign import ccall "N_VDestroy" unsafeN_VDestroy :: N_Vector -> IO ()
 
-withNVector_Serial :: SunIndexType -> SunContext -> Int -> (N_Vector -> IO a) -> IO a
+withNVector_Serial :: SunIndexType -> SUNContext -> Int -> (N_Vector -> IO a) -> IO a
 withNVector_Serial t suncontext errCode f = do
   let create = do
         res@(N_Vector ptr) <- unsafeN_VNew_Serial t suncontext
@@ -609,19 +613,19 @@ foreign import ccall "CVodeSetLinearSolver" cCVodeSetLinearSolver :: CVodeMem ->
 
 foreign import ccall "CVodeSetInitStep" cCVodeSetInitStep :: CVodeMem -> CDouble -> IO CInt
 
-foreign import ccall "SUNSparseMatrix" cSUNSparseMatrix :: SunIndexType -> SunIndexType -> CInt -> CInt -> SunContext -> IO SUNMatrix
+foreign import ccall "SUNSparseMatrix" cSUNSparseMatrix :: SunIndexType -> SunIndexType -> CInt -> CInt -> SUNContext -> IO SUNMatrix
 
-foreign import ccall "SUNLinSol_KLU" cSUNLinSol_KLU :: N_Vector -> SUNMatrix -> SunContext -> IO SUNLinearSolver
+foreign import ccall "SUNLinSol_KLU" cSUNLinSol_KLU :: N_Vector -> SUNMatrix -> SUNContext -> IO SUNLinearSolver
 
-foreign import ccall "SUNDenseMatrix" cSUNDenseMatrix :: SunIndexType -> SunIndexType -> SunContext -> IO SUNMatrix
+foreign import ccall "SUNDenseMatrix" cSUNDenseMatrix :: SunIndexType -> SunIndexType -> SUNContext -> IO SUNMatrix
 
-foreign import ccall "SUNLinSol_Dense" cSUNLinSol_Dense :: N_Vector -> SUNMatrix -> SunContext -> IO SUNLinearSolver
+foreign import ccall "SUNLinSol_Dense" cSUNLinSol_Dense :: N_Vector -> SUNMatrix -> SUNContext -> IO SUNLinearSolver
 
 foreign import ccall "SUNMatDestroy" cSUNMatDestroy :: SUNMatrix -> IO ()
 
 foreign import ccall "SUNLinSolFree" cSUNLinSolFree :: SUNLinearSolver -> IO CInt
 
-withSUNDenseMatrix :: (HasCallStack) => SunIndexType -> SunIndexType -> SunContext -> CInt -> (SUNMatrix -> IO a) -> IO a
+withSUNDenseMatrix :: (HasCallStack) => SunIndexType -> SunIndexType -> SUNContext -> CInt -> (SUNMatrix -> IO a) -> IO a
 withSUNDenseMatrix dim dim' sunctx errCode f = do
   let create = do
         mat@(SUNMatrix ptr) <- cSUNDenseMatrix dim dim' sunctx
@@ -634,7 +638,7 @@ withSUNDenseMatrix dim dim' sunctx errCode f = do
 
 -- SUNLinSolFree ls
 
-withSUNSparseMatrix :: (HasCallStack) => SunIndexType -> SunIndexType -> CInt -> CInt -> SunContext -> CInt -> (SUNMatrix -> IO a) -> IO a
+withSUNSparseMatrix :: (HasCallStack) => SunIndexType -> SunIndexType -> CInt -> CInt -> SUNContext -> CInt -> (SUNMatrix -> IO a) -> IO a
 withSUNSparseMatrix dim dim' jac set sunctx errCode f = do
   let create = do
         mat@(SUNMatrix ptr) <- cSUNSparseMatrix dim dim' jac set sunctx
@@ -645,7 +649,7 @@ withSUNSparseMatrix dim dim' jac set sunctx errCode f = do
         pure mat
   bracket create cSUNMatDestroy f
 
-withSUNLinSol_Dense :: (HasCallStack) => N_Vector -> SUNMatrix -> SunContext -> CInt -> (SUNLinearSolver -> IO a) -> IO a
+withSUNLinSol_Dense :: (HasCallStack) => N_Vector -> SUNMatrix -> SUNContext -> CInt -> (SUNLinearSolver -> IO a) -> IO a
 withSUNLinSol_Dense vec mat sunctx errCode f = do
   let create = do
         ls@(SUNLinearSolver ptr) <- cSUNLinSol_Dense vec mat sunctx
@@ -656,7 +660,7 @@ withSUNLinSol_Dense vec mat sunctx errCode f = do
         pure ls
   bracket create cSUNLinSolFree f
 
-withSUNLinSol_KLU :: (HasCallStack) => N_Vector -> SUNMatrix -> SunContext -> CInt -> (SUNLinearSolver -> IO a) -> IO a
+withSUNLinSol_KLU :: (HasCallStack) => N_Vector -> SUNMatrix -> SUNContext -> CInt -> (SUNLinearSolver -> IO a) -> IO a
 withSUNLinSol_KLU vec mat sunctx errCode f = do
   let create = do
         ls@(SUNLinearSolver ptr) <- cSUNLinSol_KLU vec mat sunctx
@@ -710,6 +714,6 @@ foreign import ccall "CVodeGetEstLocalErrors" cCVodeGetEstLocalErrors :: CVodeMe
 
 foreign import ccall "CVodeGetErrWeights" cCVodeGetErrWeights :: CVodeMem -> N_Vector -> IO CInt
 
-foreign import ccall "SUNContext_ClearErrHandlers" cSUNContext_ClearErrHandlers :: SunContext -> IO CInt
+foreign import ccall "SUNContext_ClearErrHandlers" cSUNContext_ClearErrHandlers :: SUNContext -> IO CInt
 
 foreign import ccall "N_VGetArrayPointer" cN_VGetArrayPointer :: N_Vector -> IO (Ptr CDouble)
