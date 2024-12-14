@@ -29,6 +29,7 @@ import GHC.Generics
 import GHC.Prim
 import GHC.Stack
 import Katip
+import Numeric.Sundials.Bindings.Sundials
 import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
 import Text.Printf (printf)
@@ -91,32 +92,6 @@ instance IsMethod ARKMethod where
     if methodToInt method < mIN_DIRK_NUM
       then Explicit
       else Implicit
-
--- Tries to copy the previous semantic in C when we had:
-data ReturnCode
-  = -- return, with error code, skipping finish (diagnostics and cleanup)
-    ReturnCode Int
-  | -- return with log message, skipping finish (diags and cleanup)
-    ReturnCodeWithMessage String Int
-  | -- "goto" finish (do diag and cleanup)
-    Finish LoopState
-  | -- break the loop, hence go to finish (do diag and cleanup)
-    Break LoopState
-  deriving (Exception, Show)
-
--- | The loop state, most could be just carried by recursive function call, but
--- the C semantic was kinda interleaved, so doing that for now.
-data LoopState = LoopState
-  { -- output_ind tracks the current row into the c_output_mat matrix.
-    -- if differs from input_ind because of the extra rows corresponding to events.
-    output_ind :: Int,
-    -- input_ind tracks the current index into the c_sol_time array
-    input_ind :: Int,
-    -- event_ind tracks the current event number
-    event_ind :: Int,
-    t_start :: CDouble
-  }
-  deriving (Show)
 
 foreign import ccall "wrapper"
   mkReport :: ReportErrorFnNew -> IO (FunPtr ReportErrorFnNew)
@@ -525,8 +500,6 @@ solveC _ptrStop CConsts {..} CVars {..} log_env =
 
       pure ARK_SUCCESS
 
-foreign import ccall "SUNContext_PushErrHandler" cSUNContext_PushErrHandler :: SUNContext -> FunPtr ReportErrorFnNew -> Ptr () -> IO CInt
-
 --  |]
 
 {- Note [CV_TOO_CLOSE]
@@ -563,62 +536,10 @@ foreign import ccall "SUNContext_PushErrHandler" cSUNContext_PushErrHandler :: S
    later time.
 -}
 
-
-{- NOTE [SAFETY]
-   ~~~~~~~~~~~~~~~~~~~
-
-All the call are marked (implicitly) as "safe" because they can, in theory, all call the log callback and hence "unsafe" is not relevant.
-
--}
-
--- An opaque pointer to a SUNContext
-newtype SUNContext = SUNContext (Ptr Void)
-  deriving newtype (Storable)
-
-foreign import ccall "SUNGetErrMsg" cSUNGetErrMsg :: CInt -> IO CString
-
-withSUNContext :: (HasCallStack) => (SUNContext -> IO a) -> IO a
-withSUNContext cont = do
-  alloca $ \ptr -> do
-    let create = do
-          errCode <- cSUNContext_Create 0 ptr
-          -- Exception safety here is a bit complex
-          -- Let's assume that nothing will happen here
-          when (errCode /= 0) $ do
-            errMsg <- cSUNGetErrMsg errCode
-            msg <- peekCString errMsg
-            error msg
-
-          -- Disable logging
-          pure ()
-        destroy = cSUNContext_Free ptr
-    bracket_ create destroy $ do
-      sunctx <- peek ptr
-
-      -- We force disable the logging mecanism
-      -- This stuff SPAMs stderr and generated exessive costs on our
-      -- infrastructure
-      alloca $ \loggerPtr -> do
-        errCode <- cSUNContext_GetLogger sunctx loggerPtr
-        when (loggerPtr == nullPtr || errCode /= 0) $ do
-          error $ "logger is incomplete"
-        logger <- peek loggerPtr
-
-        withCString "/dev/null" $ \devNull -> do
-          cSUNLogger_SetErrorFilename logger devNull
-          cSUNLogger_SetWarningFilename logger devNull
-          cSUNLogger_SetDebugFilename logger devNull
-          cSUNLogger_SetInfoFilename logger devNull
-          cont sunctx
-
 check :: (HasCallStack) => Int -> CInt -> IO ()
 check retCode status
   | status == ARK_SUCCESS = pure ()
   | otherwise = throwIO (ReturnCode retCode)
-
-foreign import ccall "SUNContext_Create" cSUNContext_Create :: Int -> Ptr SUNContext -> IO CInt
-
-foreign import ccall "SUNContext_Free" cSUNContext_Free :: Ptr SUNContext -> IO CInt
 
 -- | An opaque pointer to a ARKodeMem
 newtype ARKodeMem = ARKodeMem (Ptr Void)
@@ -649,34 +570,6 @@ foreign import ccall "ARKStepCreate" cARKStepCreate :: FunPtr OdeRhsCType -> Fun
 
 foreign import ccall "ARKStepFree" cARKStepFree :: Ptr ARKodeMem -> IO ()
 
--- | An opaque pointer to an N_Vector
-newtype N_Vector = N_Vector (Ptr Void)
-
-foreign import ccall "N_VNew_Serial" unsafeN_VNew_Serial :: SunIndexType -> SUNContext -> IO N_Vector
-
-foreign import ccall "N_VDestroy" unsafeN_VDestroy :: N_Vector -> IO ()
-
-withNVector_Serial :: SunIndexType -> SUNContext -> Int -> (N_Vector -> IO a) -> IO a
-withNVector_Serial t suncontext errCode f = do
-  let create = do
-        res@(N_Vector ptr) <- unsafeN_VNew_Serial t suncontext
-        when (ptr == nullPtr) $ do
-          throwIO $ ReturnCodeWithMessage "Failure in N_VNew_Serial" errCode
-        pure res
-  bracket create unsafeN_VDestroy f
-
-cNV_Ith_S :: N_Vector -> Int -> CDouble -> IO ()
-cNV_Ith_S (N_Vector ptr) i v = do
-  qtr <- getContentPtr ptr
-  rtr <- getData qtr
-  pokeElemOff rtr i v
-
-cNV_Ith_S' :: N_Vector -> Int -> IO CDouble
-cNV_Ith_S' (N_Vector ptr) i = do
-  qtr <- getContentPtr ptr
-  rtr <- getData qtr
-  peekElemOff rtr i
-
 foreign import ccall "ARKodeSetUserData" cARKodeSetUserData :: ARKodeMem -> Ptr UserData -> IO CInt
 
 foreign import ccall "ARKodeSetMinStep" cARKodeSetMinStep :: ARKodeMem -> CDouble -> IO CInt
@@ -697,64 +590,6 @@ foreign import ccall "ARKodeSetLinearSolver" cARKodeSetLinearSolver :: ARKodeMem
 
 foreign import ccall "ARKodeSetInitStep" cARKodeSetInitStep :: ARKodeMem -> CDouble -> IO CInt
 
-foreign import ccall "SUNSparseMatrix" cSUNSparseMatrix :: SunIndexType -> SunIndexType -> CInt -> CInt -> SUNContext -> IO SUNMatrix
-
-foreign import ccall "SUNLinSol_KLU" cSUNLinSol_KLU :: N_Vector -> SUNMatrix -> SUNContext -> IO SUNLinearSolver
-
-foreign import ccall "SUNDenseMatrix" cSUNDenseMatrix :: SunIndexType -> SunIndexType -> SUNContext -> IO SUNMatrix
-
-foreign import ccall "SUNLinSol_Dense" cSUNLinSol_Dense :: N_Vector -> SUNMatrix -> SUNContext -> IO SUNLinearSolver
-
-foreign import ccall "SUNMatDestroy" cSUNMatDestroy :: SUNMatrix -> IO ()
-
-foreign import ccall "SUNLinSolFree" cSUNLinSolFree :: SUNLinearSolver -> IO CInt
-
-withSUNDenseMatrix :: (HasCallStack) => SunIndexType -> SunIndexType -> SUNContext -> CInt -> (SUNMatrix -> IO a) -> IO a
-withSUNDenseMatrix dim dim' sunctx errCode f = do
-  let create = do
-        mat@(SUNMatrix ptr) <- cSUNDenseMatrix dim dim' sunctx
-
-        when (ptr == nullPtr) $ do
-          throwIO $ ReturnCode $ fromIntegral errCode
-
-        pure mat
-  bracket create cSUNMatDestroy f
-
--- SUNLinSolFree ls
-
-withSUNSparseMatrix :: (HasCallStack) => SunIndexType -> SunIndexType -> CInt -> CInt -> SUNContext -> CInt -> (SUNMatrix -> IO a) -> IO a
-withSUNSparseMatrix dim dim' jac set sunctx errCode f = do
-  let create = do
-        mat@(SUNMatrix ptr) <- cSUNSparseMatrix dim dim' jac set sunctx
-
-        when (ptr == nullPtr) $ do
-          throwIO $ ReturnCode $ fromIntegral errCode
-
-        pure mat
-  bracket create cSUNMatDestroy f
-
-withSUNLinSol_Dense :: (HasCallStack) => N_Vector -> SUNMatrix -> SUNContext -> CInt -> (SUNLinearSolver -> IO a) -> IO a
-withSUNLinSol_Dense vec mat sunctx errCode f = do
-  let create = do
-        ls@(SUNLinearSolver ptr) <- cSUNLinSol_Dense vec mat sunctx
-
-        when (ptr == nullPtr) $ do
-          throwIO $ ReturnCode $ fromIntegral errCode
-
-        pure ls
-  bracket create cSUNLinSolFree f
-
-withSUNLinSol_KLU :: (HasCallStack) => N_Vector -> SUNMatrix -> SUNContext -> CInt -> (SUNLinearSolver -> IO a) -> IO a
-withSUNLinSol_KLU vec mat sunctx errCode f = do
-  let create = do
-        ls@(SUNLinearSolver ptr) <- cSUNLinSol_KLU vec mat sunctx
-
-        when (ptr == nullPtr) $ do
-          throwIO $ ReturnCode $ fromIntegral errCode
-
-        pure ls
-  bracket create cSUNLinSolFree f
-
 foreign import ccall "ARKodeEvolve" cARKodeEvolve :: ARKodeMem -> CDouble -> N_Vector -> Ptr CDouble -> CInt -> IO CInt
 
 foreign import ccall "ARKStepReInit"
@@ -774,13 +609,6 @@ foreign import ccall "ARKodeSetFixedStep" cARKodeSetFixedStep :: ARKodeMem -> CD
 
 -- Note: the CInt are actually Enum and this could be enforced
 foreign import ccall "ARKStepSetTableNum" cARKStepSetTableNum :: ARKodeMem -> CInt -> CInt -> IO CInt
-
--- | Opaque
-newtype SUNMatrix = SUNMatrix (Ptr Void)
-  deriving newtype (Storable)
-
-newtype SUNLinearSolver = SUNLinearSolver (Ptr Void)
-  deriving newtype (Storable)
 
 foreign import ccall "ARKodeGetNumSteps" cARKodeGetNumSteps :: ARKodeMem -> Ptr CLong -> IO CInt
 
@@ -811,20 +639,3 @@ cvGet getter cvode_mem = do
 foreign import ccall "ARKodeGetEstLocalErrors" cARKodeGetEstLocalErrors :: ARKodeMem -> N_Vector -> IO CInt
 
 foreign import ccall "ARKodeGetErrWeights" cARKodeGetErrWeights :: ARKodeMem -> N_Vector -> IO CInt
-
-foreign import ccall "SUNContext_ClearErrHandlers" cSUNContext_ClearErrHandlers :: SUNContext -> IO CInt
-
-foreign import ccall "N_VGetArrayPointer" cN_VGetArrayPointer :: N_Vector -> IO (Ptr CDouble)
-
--- * Logs
-newtype SUNLogger = SUNLogger (Ptr Void)
-  deriving newtype Storable
-
-foreign import ccall "SUNContext_GetLogger" cSUNContext_GetLogger :: SUNContext -> Ptr SUNLogger -> IO CInt
-
-foreign import ccall "SUNLogger_SetErrorFilename" cSUNLogger_SetErrorFilename :: SUNLogger -> CString -> IO ()
-foreign import ccall "SUNLogger_SetWarningFilename" cSUNLogger_SetWarningFilename :: SUNLogger -> CString -> IO ()
-foreign import ccall "SUNLogger_SetInfoFilename" cSUNLogger_SetInfoFilename :: SUNLogger -> CString -> IO ()
-foreign import ccall "SUNLogger_SetDebugFilename" cSUNLogger_SetDebugFilename :: SUNLogger -> CString -> IO ()
-
-

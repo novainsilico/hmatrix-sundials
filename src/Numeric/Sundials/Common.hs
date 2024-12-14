@@ -548,3 +548,6 @@ newtype TimeEventSpec = TimeEventSpec (IO Double)
 - solver, which will help us introducing new solver (such as IDA).
 -}
 
+
+-- ** Sundial bindings
+

@@ -42,6 +42,7 @@ library
                        Numeric.Sundials.CVode
                        Numeric.Sundials.Foreign
                        Numeric.Sundials.Common
+                       Numeric.Sundials.Bindings.Sundials
   c-sources:           src/helpers.c
   default-language:    Haskell2010
   default-extensions:  NondecreasingIndentation
