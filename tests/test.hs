@@ -10,7 +10,6 @@ import Test.Tasty
 import Test.Tasty.Golden
 import Test.Tasty.Golden.Advanced
 import Test.Tasty.HUnit
-import Test.Tasty.Runners
 
 import Numeric.Sundials
 
@@ -30,6 +29,9 @@ import Text.Printf (printf)
 import Data.Aeson
 import Data.Aeson.Encode.Pretty
 import GHC.Generics
+import Numeric.Sundials.Common (OdeResidual(..))
+import Numeric.Sundials.Common (ProblemFunctions(..))
+import Numeric.Sundials.Common (ResidualFunctions(..))
 
 ----------------------------------------------------------------------
 --                            Helpers
@@ -37,7 +39,7 @@ import GHC.Generics
 
 emptyOdeProblem :: OdeProblem
 emptyOdeProblem = OdeProblem
-      { odeRhs = error "emptyOdeProblem: no odeRhs provided"
+      { odeFunctions = error "emptyOdeProblem: no odeFunctions provided"
       , odeJacobian = Nothing
       , odeInitCond = error "emptyOdeProblem: no odeInitCond provided"
       , odeEventDirections = V.empty
@@ -59,6 +61,7 @@ availableSolvers :: [OdeSolver]
 availableSolvers =
   [ OdeSolver "CVode"  (CVMethod <$> [BDF, ADAMS])
   , OdeSolver "ARKode" (ARKMethod <$> [SDIRK_5_3_4, TRBDF2_3_3_2, FEHLBERG_6_4_5])
+  , OdeSolver "IDA" [IDAMethod IDADefault]
   ]
 
 defaultOpts :: OdeMethod -> ODEOpts
@@ -145,6 +148,7 @@ methodSolver :: OdeMethod -> String
 methodSolver = \case
   ARKMethod{} -> "ARKode"
   CVMethod{} -> "CVode"
+  IDAMethod{} -> "IDA"
 
 odeGoldenTest
   :: Bool -- ^ compare between methods? (via a canonical golden file)
@@ -255,7 +259,8 @@ main = do
   -- On "nova" fork, we don't care about ARKMethod, so we are fine
   let Just broken_test_pattern = parseTestPattern "!/ARKMethod SDIRK_5_3_4.Events.Robertson.Canonical/&&!/ARKMethod TRBDF2_3_3_2.Accuracy tests.Simple sine/"
 
-  defaultMain $ localOption broken_test_pattern $ testGroup "Tests" $
+  defaultMain $ {- localOption broken_test_pattern $ -} testGroup "Tests" $
+    [idaTests] <>
     [
       testGroup solver_name
       [ testGroup (show method) $
@@ -283,6 +288,52 @@ main = do
       ]
     | OdeSolver solver_name methods <- availableSolvers
     ]
+
+idaTests :: (?log_env::LogEnv) => TestTree
+idaTests = testGroup "IDAsimple" $ [
+  testCase "simple" $ do
+    Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
+                  { 
+                    odeFunctions = odeRhsPure $ \_t _y -> [1]
+                  , odeJacobian = Nothing
+                  , odeInitCond = [0]
+                  , odeSolTimes = VS.fromList [0..10]
+                  , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
+                  }
+    print r
+    pure ()
+  ,testCase "residualsimple" $ do
+    Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
+                  { 
+                     odeFunctions = ResidualProblemFunctions ResidualFunctions {
+                          odeResidual = OdeResidual $ \_t _y yp -> pure (VS.map (subtract 1) yp)
+                          , odeDifferentials = VS.fromList [1.0]
+                          , odeInitialDifferentials = VS.fromList [1.0]
+                          }
+                  , odeJacobian = Nothing
+                  , odeInitCond = [0]
+                  , odeSolTimes = VS.fromList [0..10]
+                  , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
+                  }
+    print r
+    pure ()
+  ,testCase "residualadvanced" $ do
+    Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
+                  { 
+                    odeFunctions = ResidualProblemFunctions ResidualFunctions {
+                              odeResidual = OdeResidual $ \_t y yp -> pure ([yp VS.! 0 - 1, y VS.! 0 + y VS.! 1])
+                            , odeDifferentials = VS.fromList [0.0, 1.0]
+                            , odeInitialDifferentials = VS.fromList [1.0, -1.0]
+                              }
+                  , odeJacobian = Nothing
+                  , odeInitCond = [0, 0]
+                  , odeSolTimes = VS.fromList [0..10]
+                  , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
+                  }
+    print r
+    pure ()
+ ]
+
 
 noErrorTests opts = testGroup "Absence of error"
   [ testCase name $ do
@@ -368,13 +419,13 @@ eventTests opts = testGroup "Events"
       assertRaises ConditionException $
         runKatipT ?log_env $ solve opts (boundedSine
         {
-          odeRhs = OdeRhsHaskell $ \_ _ -> return $ throw ConditionException
+          odeFunctions = OdeProblemFunctions $ OdeRhsHaskell $ \_ _ -> return $ throw ConditionException
         })
   ,  testCase "impure exception in rhs" $
       assertRaises ConditionException $
         runKatipT ?log_env $ solve opts (boundedSine
         {
-          odeRhs = OdeRhsHaskell $ \_ _ -> throwIO ConditionException
+          odeFunctions = OdeProblemFunctions $ OdeRhsHaskell $ \_ _ -> throwIO ConditionException
         })
   , testCase "pure exception in event handler" $
       assertRaises ConditionException $
@@ -445,7 +496,7 @@ maxStepTest opts0 = localOption (mkTimeout 1e5) $ testGroup "Max step"
   [ odeGoldenTest False opts (printf "maxStep=%s" maxStepStr) $
       runKatipT ?log_env $ solve opts 
       emptyOdeProblem
-      { odeRhs = odeRhsPure $ \t _ ->
+      { odeFunctions = odeRhsPure $ \t _ ->
           if 5 <= t && t <= 6 then [1] else [0]
       , odeInitCond = [0]
       , odeSolTimes = [0,1 .. 10]
@@ -470,7 +521,7 @@ cascadingEventsTest opts = odeGoldenTest True opts "Cascading_events" $ do
   runKatipT ?log_env $ solve opts prob
   where
     prob = emptyOdeProblem
-      { odeRhs = odeRhsPure $ \_ _ -> [1, 0]
+      { odeFunctions = odeRhsPure $ \_ _ -> [1, 0]
       , odeInitCond = [0, 0]
       , odeEventDirections = V.replicate 2 AnyDirection
       , odeEventConditions = eventConditionsPure
@@ -493,7 +544,7 @@ simultaneousEventsTest opts = testGroup "Simultaneous events"
     (showList record)
     (showList stopSolver)) $ do
       let prob = emptyOdeProblem
-            { odeRhs = odeRhsPure $ \_ _ -> [0,0]
+            { odeFunctions = odeRhsPure $ \_ _ -> [0,0]
             , odeJacobian = Nothing
             , odeInitCond = [0,0]
             , odeEventDirections = V.replicate 2 AnyDirection
@@ -532,7 +583,7 @@ timeBasedEventTest opts = odeGoldenTest True opts "Time-based events" $ do
     , (4.0, upd 8, True, True)
     ]
   let prob = emptyOdeProblem
-        { odeRhs = odeRhsPure $ \_ _ -> [1, 0]
+        { odeFunctions = odeRhsPure $ \_ _ -> [1, 0]
         , odeInitCond = [0, 0]
         , odeEventDirections = [Upwards]
         , odeEventConditions = eventConditionsPure [\t y -> t/2 + y ! 0 - 4.5]
@@ -549,7 +600,7 @@ timeBasedEventTest opts = odeGoldenTest True opts "Time-based events" $ do
 -- time grid does not start at 0.
 timeGridTest opts = odeGoldenTest True opts "Time grid test" $ do
   runKatipT ?log_env $ solve opts emptyOdeProblem
-    { odeRhs = odeRhsPure $ \_ _ -> [1]
+    { odeFunctions = odeRhsPure $ \_ _ -> [1]
     , odeInitCond = [0]
     , odeSolTimes = [-3, -2, 0, 10, 100]
     }
@@ -567,7 +618,7 @@ timeAliasingTests opts = testGroup "Time aliasing"
         | t <- VS.toList ts
         ]
       runKatipT ?log_env $ solve opts emptyOdeProblem
-        { odeRhs = odeRhsPure $ \_ _ -> [1]
+        { odeFunctions = odeRhsPure $ \_ _ -> [1]
         , odeInitCond = [0]
         , odeSolTimes = ts
         , odeTimeBasedEvents = time_ev_spec
@@ -584,7 +635,7 @@ timeAliasingTests opts = testGroup "Time aliasing"
 
 brusselator :: (String, OdeProblem)
 brusselator = (,) "brusselator" $ emptyOdeProblem
-  { odeRhs = odeRhsPure $ \_t x ->
+  { odeFunctions = odeRhsPure $ \_t x ->
       let
         u = x VS.! 0
         v = x VS.! 1
@@ -617,7 +668,7 @@ brusselator = (,) "brusselator" $ emptyOdeProblem
     eps = 5.0e-6
 
 exponential = emptyOdeProblem
-  { odeRhs = odeRhsPure $ \_ y -> [y VS.! 0]
+  { odeFunctions = odeRhsPure $ \_ y -> [y VS.! 0]
   , odeJacobian = Nothing
   , odeInitCond = vector [1]
   , odeEventDirections = [Upwards]
@@ -629,7 +680,7 @@ exponential = emptyOdeProblem
   }
 
 robertson = (,) "Robertson" $ emptyOdeProblem
-  { odeRhs = odeRhsPure $ \_ (VS.toList -> [y1,y2,y3]) ->
+  { odeFunctions = odeRhsPure $ \_ (VS.toList -> [y1,y2,y3]) ->
       [ -0.04 * y1 + 1.0e4 * y2 * y3
       , 0.04 * y1 - 1.0e4 * y2 * y3 - 3.0e7 * (y2)^(2 :: Int)
       , 3.0e7 * (y2)^(2 :: Int)
@@ -647,7 +698,7 @@ robertson = (,) "Robertson" $ emptyOdeProblem
   }
 
 empty = (,) "Empty system" $ emptyOdeProblem
-  { odeRhs = odeRhsPure $ \_ _ -> []
+  { odeFunctions = odeRhsPure $ \_ _ -> []
   , odeJacobian = Nothing
   , odeInitCond = []
   , odeEventHandler = nilEventHandler
@@ -657,7 +708,7 @@ empty = (,) "Empty system" $ emptyOdeProblem
   }
 
 stiffish = emptyOdeProblem
-  { odeRhs = odeRhsPure $ \t ((VS.! 0) -> u) -> [ lamda * u + 1.0 / (1.0 + t * t) - lamda * atan t ]
+  { odeFunctions = odeRhsPure $ \t ((VS.! 0) -> u) -> [ lamda * u + 1.0 / (1.0 + t * t) - lamda * atan t ]
   , odeJacobian = Nothing
   , odeInitCond = [0.0]
   , odeEventHandler = nilEventHandler
@@ -669,7 +720,7 @@ stiffish = emptyOdeProblem
     lamda = -100.0
 
 simpleSine = emptyOdeProblem
-  { odeRhs = odeRhsPure $ \_t y -> [y VS.! 1, - y VS.! 0]
+  { odeFunctions = odeRhsPure $ \_t y -> [y VS.! 1, - y VS.! 0]
   , odeJacobian = Just . OdeJacobianHaskell $ \_ _ -> (2><2)
         [  0, 1
         , -1, 0
@@ -699,7 +750,7 @@ boundedSine = simpleSine
 
 -- | An example of a system with a discontinuous RHS
 discontinuousRHS = emptyOdeProblem
-  { odeRhs = odeRhsPure $ \t _ ->
+  { odeFunctions = odeRhsPure $ \t _ ->
       if t1 <= t && t <= t2
         then [deriv]
         else [0]
@@ -725,7 +776,7 @@ discontinuousRHS = emptyOdeProblem
     deriv = 100
 
 modulusEvent record_event = emptyOdeProblem
-  { odeRhs = odeRhsPure $ \t _ -> [t `fmod` 1]
+  { odeFunctions = odeRhsPure $ \t _ -> [t `fmod` 1]
   , odeJacobian = Nothing
   , odeInitCond = [0]
   , odeEventDirections = [AnyDirection]

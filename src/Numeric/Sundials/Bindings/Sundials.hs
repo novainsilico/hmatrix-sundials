@@ -66,7 +66,7 @@ setErrorHandler sunctx handler = do
 -- * Vectors
 
 -- | An opaque pointer to an N_Vector
-newtype N_Vector = N_Vector (Ptr Void)
+newtype N_Vector = N_Vector {getSunVector :: Ptr SunVector}
 
 foreign import ccall "N_VNew_Serial" cN_VNew_Serial :: SunIndexType -> SUNContext -> IO N_Vector
 
@@ -74,6 +74,8 @@ foreign import ccall "N_VNew_Serial" cN_VNew_Serial :: SunIndexType -> SUNContex
 
 foreign import ccall "N_VDestroy" cN_VDestroy :: N_Vector -> IO ()
 
+
+-- TODO: build a wrapper which init the vector
 withNVector_Serial :: SunIndexType -> SUNContext -> Int -> (N_Vector -> IO a) -> IO a
 withNVector_Serial t suncontext errCode f = do
   let create = do

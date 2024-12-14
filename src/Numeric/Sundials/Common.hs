@@ -99,12 +99,24 @@ data CConsts = CConsts
   , c_n_sol_times :: CInt
   , c_sol_time :: VS.Vector CDouble
   , c_init_cond :: VS.Vector CDouble
+  , c_is_differential :: VS.Vector CDouble
+  -- ^ For IDA: tells if a value is driven by a differential (==1.0) or algebraic (==0.0)
+  , c_init_differentials :: VS.Vector CDouble
+  -- ^ For IDA: initial value for the differentials. That's a "best guess"
   , c_rhs :: FunPtr OdeRhsCType
+  -- ^ For ode solving, ode RHS function
+  , c_ida_res :: FunPtr IDAResFn
+  -- ^ For IDA: residual function
+
   , c_rhs_userdata :: Ptr UserData
   , c_rtol :: CDouble
   , c_atol :: VS.Vector CDouble
   , c_n_event_specs :: CInt
   , c_event_fn :: FunPtr EventConditionCType
+  -- ^ Root solving for ode problem
+  , c_event_fn_ida :: FunPtr IDARootFn
+  -- ^ Root solving for ida problem
+
   , c_apply_event
       :: CInt -- number of triggered events
       -> Ptr CInt -- event indices
@@ -116,11 +128,17 @@ data CConsts = CConsts
       -> IO CInt
   , c_jac_set :: CInt
   , c_jac :: FunPtr OdeJacobianCType
+  -- ^ Jacobian for ode problem
+  , c_jac_ida :: FunPtr IDALsJacFn
+  -- ^ Jacobian for IDA problem
+
   , c_sparse_jac :: CInt
       -- ^ If 0, use a dense matrix.
       -- If non-0, use a sparse matrix with that number of non-zero
       -- elements.
   , c_requested_event_direction :: VS.Vector CInt
+  -- TODO: this function is not called from C, so we can be smart and actually
+  -- use Maybe, instead of sentinel value
   , c_next_time_event :: IO CDouble
   , c_max_events :: CInt
   , c_minstep :: CDouble
@@ -170,10 +188,18 @@ foreign import ccall "wrapper"
   mkOdeRhsC :: OdeRhsCType -> IO (FunPtr OdeRhsCType)
 
 foreign import ccall "wrapper"
+  mkIDAResFn :: IDAResFn -> IO (FunPtr IDAResFn)
+
+foreign import ccall "wrapper"
   mkOdeJacobianC :: OdeJacobianCType -> IO (FunPtr OdeJacobianCType)
+foreign import ccall "wrapper"
+  mkIDALsJacFn :: IDALsJacFn -> IO (FunPtr IDALsJacFn)
 
 foreign import ccall "wrapper"
   mkEventConditionsC :: EventConditionCType -> IO (FunPtr EventConditionCType)
+
+foreign import ccall "wrapper"
+  mkIDARootFn :: IDARootFn -> IO (FunPtr IDARootFn)
 
 assembleSolverResult
   :: OdeProblem
@@ -334,9 +360,41 @@ type TimePointHandler
   =  CInt -- ^ timepoint index
   -> IO ()
 
+-- | Represents the inner function of the system. The solver can solve
+-- "residual problem" (including algebraic equations), such as @f(t, v, v') = 0@ with the 'IDAMethod'
+-- solver and simple "ode" problems, such as @dv/dt = f(t, v)@, using
+-- 'CVMethod', 'ARKMethod' and 'IDAMethod'.
+--
+-- Note that you can provide an 'OdeFunctions' while using 'IDAMethod', the
+-- solver will wrap the functions for you.
+data ProblemFunctions = 
+      -- | When solving a "ode" problem, such as @dv/dt = f(t, v)@
+       -- The right-hand side of the system: either a Haskell function or
+       -- a pointer to a compiled function. That's the @f@ function.
+      OdeProblemFunctions OdeRhs
+      |
+      -- | When solving a "residual" problem, such as @f(t, v, v') = 0@
+      ResidualProblemFunctions ResidualFunctions
+
+-- | When solving a "residual" problem, such as @f(t, v, v') = 0@
+data ResidualFunctions = ResidualFunctions {
+        odeResidual :: OdeResidual
+      -- ^ The residual function. Is available, when solving with IDA, it will be
+      -- used instead of the 'odeRhs'. That's the "f" function.
+      , odeDifferentials :: (VS.Vector Double)
+      -- ^ Only when solving with IDA, tells if the unknown is driven by an ode
+      -- (==1.0) or by an algebraic equation (==0.0). Filled as all derivatives if
+      -- not provided.
+      , odeInitialDifferentials :: (VS.Vector Double)
+      -- ^ Only when solving with IDA, provides the initial derivatievs of the
+      -- unknown. Will be computed by the solver if not provided.
+    }
+
 data OdeProblem = OdeProblem
   { odeEventConditions :: EventConditions
-    -- ^ The event conditions
+    -- ^ The event conditions. Used either for "ode" or "residual" problem.
+    -- TODO: exposes the event condition function for residual, it allows event
+    -- to test @yp@.
   , odeEventDirections :: V.Vector CrossingDirection
     -- ^ The requested directions of 0 crossing for each event. Also, the
     -- length of this vector tells us the number of events (even when
@@ -347,12 +405,12 @@ data OdeProblem = OdeProblem
     -- error is returned.
   , odeEventHandler :: EventHandler -- ^ The event handler.
   , odeTimeBasedEvents :: TimeEventSpec
-  , odeRhs :: OdeRhs
-    -- ^ The right-hand side of the system: either a Haskell function or
-    -- a pointer to a compiled function.
+  , odeFunctions :: ProblemFunctions
   , odeJacobian :: Maybe OdeJacobian
     -- ^ The optional Jacobian (the arguments are the time and the state
-    -- vector).
+    -- vector). Used either for "ode" or "residual" problems.
+    -- TODO: expose the Jacobian for residual problem, it is parametrized by
+    -- the `yp` parameter.
   , odeInitCond :: VS.Vector Double
     -- ^ The initial conditions of the problem.
   , odeSolTimes :: VS.Vector Double
@@ -374,6 +432,21 @@ data Tolerances = Tolerances
 -- | The type of the C ODE RHS function.
 type OdeRhsCType = CDouble -> Ptr SunVector -> Ptr SunVector -> Ptr UserData -> IO CInt
 
+-- | The residual function for IDA solving
+type IDAResFn =
+   -- t
+   CDouble ->
+   -- y
+   Ptr SunVector ->
+   -- yp
+   Ptr SunVector ->
+   -- F(t, y, yp) (out parameter)
+   Ptr SunVector ->
+   -- user data
+   Ptr UserData ->
+   -- | Return code
+   IO CInt
+
 data UserData
 
 -- | The right-hand side of an ODE system.
@@ -383,16 +456,32 @@ data OdeRhs
   = OdeRhsHaskell (CDouble -> VS.Vector CDouble -> IO (VS.Vector CDouble))
   | OdeRhsC (FunPtr OdeRhsCType) (Ptr UserData)
 
+data OdeResidual
+  = OdeResidual (CDouble -> VS.Vector CDouble -> VS.Vector CDouble -> IO (VS.Vector CDouble))
+
 -- | A version of 'OdeRhsHaskell' that accepts a pure function
 odeRhsPure
   :: (CDouble -> VS.Vector CDouble -> VS.Vector CDouble)
-  -> OdeRhs
-odeRhsPure f = OdeRhsHaskell $ \t y -> return $ f t y
+  -> ProblemFunctions
+odeRhsPure f = OdeProblemFunctions $ OdeRhsHaskell $ \t y -> return $ f t y
 
 type OdeJacobianCType
   =  SunRealType   -- ^ @realtype t@
   -> Ptr SunVector -- ^ @N_Vector y@
   -> Ptr SunVector -- ^ @N_Vector fy@
+  -> Ptr SunMatrix -- ^ @SUNMatrix Jac@
+  -> Ptr UserData  -- ^ @void *user_data@
+  -> Ptr SunVector -- ^ @N_Vector tmp1@
+  -> Ptr SunVector -- ^ @N_Vector tmp2@
+  -> Ptr SunVector -- ^ @N_Vector tmp3@
+  -> IO CInt       -- ^ return value (0 if successful, >0 for a recoverable error, <0 for an unrecoverable error)
+
+type IDALsJacFn
+  =  SunRealType   -- ^ @realtype t@
+  ->  SunRealType   -- ^ @realtype cj@
+  -> Ptr SunVector -- ^ @N_Vector y@
+  -> Ptr SunVector -- ^ @N_Vector yp@
+  -> Ptr SunVector -- ^ @N_Vector r@
   -> Ptr SunMatrix -- ^ @SUNMatrix Jac@
   -> Ptr UserData  -- ^ @void *user_data@
   -> Ptr SunVector -- ^ @N_Vector tmp1@
@@ -415,6 +504,14 @@ data JacobianRepr
 type EventConditionCType
   =  SunRealType     -- ^ @realtype t@
   -> Ptr SunVector   -- ^ @N_Vector y@
+  -> Ptr SunRealType -- ^ @realtype *gout@
+  -> Ptr UserData    -- ^ @void *user_data@
+  -> IO CInt
+
+type IDARootFn
+  =  SunRealType     -- ^ @realtype t@
+  -> Ptr SunVector   -- ^ @N_Vector y@
+  -> Ptr SunVector   -- ^ @N_Vector yp@
   -> Ptr SunRealType -- ^ @realtype *gout@
   -> Ptr UserData    -- ^ @void *user_data@
   -> IO CInt

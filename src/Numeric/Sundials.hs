@@ -28,6 +28,7 @@ module Numeric.Sundials
   , OdeMethod(..)
   , ARK.ARKMethod(..)
   , CV.CVMethod(..)
+  , IDA.IDAMethod(..)
   , allOdeMethods
   , IsMethod(..)
   , MethodType(..)
@@ -58,6 +59,7 @@ import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
 import qualified Numeric.Sundials.CVode as CV
 import qualified Numeric.Sundials.ARKode as ARK
+import qualified Numeric.Sundials.IDA as IDA
 import Katip
 
 import Foreign.C.Types
@@ -68,7 +70,7 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Storable as VS
 import Data.Maybe
 import Data.Int
-import Numeric.LinearAlgebra.HMatrix as H hiding (Vector)
+import Numeric.LinearAlgebra.HMatrix as H hiding ((<>), Vector)
 import GHC.Generics
 import Control.Monad.IO.Class
 import Control.Monad.Cont
@@ -76,26 +78,32 @@ import Control.Exception
 import Control.Concurrent.MVar
 import Data.Vector.Mutable (RealWorld)
 import Data.Coerce (coerce)
+import Control.Monad (when)
+import Numeric.Sundials.Bindings.Sundials (withSUNContext, withNVector_Serial, cNV_Ith_S, N_Vector (..))
 
 -- | A supported ODE solving method, either by CVode or ARKode
 data OdeMethod
   = CVMethod CV.CVMethod
   | ARKMethod ARK.ARKMethod
+  | IDAMethod IDA.IDAMethod
   deriving (Eq, Ord, Show, Read, Generic)
 
 -- | List of all supported ODE methods
 allOdeMethods :: [OdeMethod]
 allOdeMethods =
   (CVMethod <$> [minBound .. maxBound]) ++
-  (ARKMethod <$> [minBound .. maxBound])
+  (ARKMethod <$> [minBound .. maxBound]) ++ 
+  (IDAMethod <$> [minBound .. maxBound])
 
 instance IsMethod OdeMethod where
   methodToInt = \case
     ARKMethod m -> methodToInt m
     CVMethod m -> methodToInt m
+    IDAMethod m -> methodToInt m
   methodType = \case
     ARKMethod m -> methodType m
     CVMethod m -> methodType m
+    IDAMethod m -> methodType m
 
 data ODEOpts = ODEOpts {
     maxNumSteps :: Int32
@@ -137,6 +145,7 @@ solve opts =
       case odeMethod opts of
         CVMethod{} -> CV.solveC
         ARKMethod{} -> ARK.solveC
+        IDAMethod{} -> IDA.solveC
 
   in solveCommon solveC opts
 
@@ -167,6 +176,21 @@ solveCommon solve_c opts problem@(OdeProblem{..})
       solve_c consts vars log_env
     frozenVars <- freezeCVars vars
     assembleSolverResult problem ret frozenVars
+
+-- | Classify the method required as if it is ode or residual
+data ProblemType =
+  -- | An ode method only contains @dv/dt = f(t, v)@ odes
+  Ode
+  |
+  -- | A residual method, such as IDA, can solve @f(t, v, v') = 0@
+  Residual
+
+-- | Classify the method required as if it is ode or residual
+getProblemType :: OdeMethod -> ProblemType
+getProblemType (IDAMethod _) = Residual
+getProblemType (ARKMethod _) = Ode
+getProblemType (CVMethod _) = Ode
+
 
 withCConsts
   :: ODEOpts
@@ -208,6 +232,7 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
     c_init_step_size =  maybe 0 coerce initStep
     c_n_event_specs = fromIntegral $ V.length odeEventDirections
     c_requested_event_direction = V.convert $ V.map directionToInt odeEventDirections
+    -- TODO: this is not called from sundial, so the "C" wrapping is not mandatory
     c_apply_event n_events event_indices_ptr t y_ptr y'_ptr stop_solver_ptr record_event_ptr = do
       event_indices <- vecFromPtr event_indices_ptr (fromIntegral n_events)
       y_vec <- peek y_ptr
@@ -241,26 +266,136 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
       DenseJacobian -> 0
     c_method = methodToInt odeMethod
 
-  (c_rhs, c_rhs_userdata) <-
-    case odeRhs of
-      OdeRhsC ptr u -> return (ptr, u)
-      OdeRhsHaskell fun -> do
-        let
-          funIO :: OdeRhsCType
-          funIO t y f _ptr = do
-            sv <- peek y
+  -- Starting here, the code generates the different 'FunPtr' required by sundials, namely:
+  --
+  --    - the ode or residual function: c_rhs, c_ida_res
+  --    - the event function: c_event_fn, c_event_fn_ida
+  --    - the jacobian function: c_jac, c_jac_id,
+  --    - IDA only data: c_is_differential, c_init_differentials
+  --
+  -- The code is super convoluted because of the different uses cases we aim to support:
+  --
+  -- - For ode solving: c_rhs, c_event_fn, c_jac
+  -- - For ida solving: c_ida_res, c_event_fn_ida, c_jac_ida, c_is_differential, c_init_differentials
+  -- - for ida solving, but when on ODE problem is required, we generate:
+  --    - c_ida_res, by wrapping c_rhs
+  --    - c_is_differential is set to 1.0 for each components
+  --    - c_init_differentials is initialised using c_rhs
+  --
+  -- The latest point is done in order to test the solver on "non-residual"
+  -- problem.
+  --
+  -- Most of the not required values are set to dummy values. This is imperfect
+  -- and unsafe, we just assume that the test coverage does correctly test
+  -- theses cases.
+  (c_rhs, c_ida_res, c_rhs_userdata, c_is_differential, c_init_differentials) <- case odeFunctions of
+    OdeProblemFunctions odeRhs -> do
+      -- Estimation of the initial differentials, because not provided by the user
+      let compute_initial_differentials c_rhs c_rhs_userdata = do
+           -- If we don't know, let's just evaluate the rhs once
+           let t0 = fromMaybe (error "no t0") $ c_sol_time VS.!? 0
+           withSUNContext $ \sunctx -> do
+                withNVector_Serial c_dim sunctx 6471 $ \y0_ptr -> do
+                withNVector_Serial c_dim sunctx 6471 $ \res_ptr -> do
+                  VS.imapM_ (\i v -> cNV_Ith_S y0_ptr i v) c_init_cond
+                  resC <- (runOdeRhs c_rhs) t0 (getSunVector y0_ptr) (getSunVector res_ptr) c_rhs_userdata
+                  if resC /= 0
+                  then
+                    error $ "sundials returned an error during initialisation phase: " <> show resC
+                  else do
+                    res <- sunVecVals <$> peek (getSunVector res_ptr)
+                    pure res
 
-            -- Save the exception (if any)
-            saveExceptionContext exceptionRef $ do
-              r <- fun t (sunVecVals sv)
+      case odeRhs of
+        -- TODO: maybe we can leverage the user data somewhere in order to work
+        -- with DDE and other stuffs and "constant" values (e.g. time-varying
+        -- categoricals for example)
+        OdeRhsC ptr u -> do
+          case getProblemType odeMethod of
+            Residual -> do
+              -- If we don't know, let's assume that everything is differential
+              let c_is_differential = VS.replicate dim 1.0
+              funptrida <- wrap_ide_ode_rhs ptr
+              initDifferentials <- liftIO $ compute_initial_differentials ptr u
+              return (ptr, funptrida, u, c_is_differential, initDifferentials)
+            Ode -> do
+              return (ptr, nullFunPtr, u, mempty, mempty)
+        OdeRhsHaskell fun -> do
+          let
+            funIO :: OdeRhsCType
+            funIO t y f _ptr = do
+              sv <- peek y
 
-              -- Note: the following operation will force "r"
-              -- and discover any hidden exception
-              poke f $ SunVector { sunVecN = sunVecN sv
-                                 , sunVecVals = r
-                                 }
-        funptr <- ContT $ bracket (mkOdeRhsC funIO) freeHaskellFunPtr
-        return (funptr, nullPtr)
+              -- Save the exception (if any)
+              saveExceptionContext exceptionRef $ do
+                r <- fun t (sunVecVals sv)
+
+                -- Note: the following operation will force "r"
+                -- and discover any hidden exception
+                poke f $ SunVector { sunVecN = sunVecN sv
+                                   , sunVecVals = r
+                                   }
+
+            -- In case the user does not provide a residual function, we build
+            -- one from the ode rhs provided function.
+            funIdaCompatIO :: IDAResFn
+            funIdaCompatIO t y yp f _ptr = do
+              -- Save the exception (if any)
+              saveExceptionContext exceptionRef $ do
+                sv <- peek y
+                svp <- peek yp
+
+                ypComputed <- fun t (sunVecVals sv)
+                -- The residual function is F(y, yp, t) = 0
+                -- However, we only have yp_rhs = f(y, t)
+                --
+                -- So we build F(y, yp, t) = yp_rhs - yp = f(y, t) - yp
+                let res = VS.zipWith (-) ypComputed (sunVecVals svp)
+
+                -- Note: the following operation will force "res"
+                -- and discover any hidden exception
+                poke f $ SunVector { sunVecN = sunVecN sv
+                                   , sunVecVals = res
+                                   }
+
+          case getProblemType odeMethod of
+            Residual -> do
+              -- We solve an IDA problem, we don't care about the ode
+              -- implementation, however the rhs can be useful when evaluating
+              -- initial derivatives
+              funptr <- ContT $ bracket (mkOdeRhsC funIO) freeHaskellFunPtr
+              funidaptr <- ContT $ bracket (mkIDAResFn funIdaCompatIO) freeHaskellFunPtr
+
+              -- If we don't know, let's assume that everything is differential
+              let c_is_differential = VS.replicate dim 1.0
+              initDifferentials <- liftIO $ compute_initial_differentials funptr nullPtr
+              return (funptr, funidaptr, nullPtr, c_is_differential, initDifferentials)
+            Ode -> do
+              -- We will solve an ode problem, we don't care about the ida implementation
+              funptr <- ContT $ bracket (mkOdeRhsC funIO) freeHaskellFunPtr
+              let funidaptr = nullFunPtr
+              -- We don't care about differential informations
+              let c_is_differential = mempty
+              return (funptr, funidaptr, nullPtr, c_is_differential, mempty)
+    ResidualProblemFunctions ResidualFunctions{odeResidual=OdeResidual odeResidualF, ..} -> do
+          let
+            -- That's a correct residual function
+            funIdaResidualIO = fn
+              where 
+                fn t y yp residual _ptr = do
+                   -- Save the exception (if any)
+                   saveExceptionContext exceptionRef $ do
+                     sv <- peek y
+                     svp <- peek yp
+                     res <- odeResidualF t (sunVecVals sv) (sunVecVals svp)
+
+                     -- Note: the following operation will force "res"
+                     -- and discover any hidden exception
+                     poke residual $ SunVector { sunVecN = sunVecN sv
+                                        , sunVecVals = res
+                                        }
+          funidaptr <- ContT $ bracket (mkIDAResFn funIdaResidualIO) freeHaskellFunPtr
+          return (nullFunPtr, funidaptr, nullPtr, VS.unsafeCoerceVector odeDifferentials, VS.unsafeCoerceVector odeInitialDifferentials)
   let c_ontimepoint idx = do
         case odeOnTimePoint of
           Nothing -> pure ()
@@ -269,10 +404,12 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
             _ <- saveExceptionContext exceptionRef $ do
               fun idx
             pure ()
-  c_jac <-
+  (c_jac, c_jac_ida) <-
     case odeJacobian of
-      Nothing   -> return nullFunPtr
-      Just (OdeJacobianC fptr) -> return fptr
+      Nothing   -> return (nullFunPtr, nullFunPtr)
+      Just (OdeJacobianC fptr) -> do
+        funptrida <- wrap_ide_ode_jacobian fptr
+        return (fptr, funptrida)
       Just (OdeJacobianHaskell jac_fn) -> do
       let
         funIO :: OdeJacobianCType
@@ -286,11 +423,38 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
             DenseJacobian -> poke jac_ptr jac
             SparseJacobian spat -> poke (castPtr jac_ptr) (T.SparseMatrix spat jac)
           return 0
-      funptr <- ContT $ bracket (mkOdeJacobianC funIO) freeHaskellFunPtr
-      return funptr
-  c_event_fn <-
+        funIdaIO :: IDALsJacFn
+        funIdaIO t cj y_ptr _yp_ptr _r jac_ptr _userdata _tmp1 _tmp2 _tmp3 = do
+          y <- peek y_ptr
+          let jac = matrixToSunMatrix $
+                (jac_fn
+                  (coerce t :: Double)
+                  (VS.unsafeCoerceVector $ sunVecVals y :: VS.Vector Double))
+                     - (realToFrac cj * ident (VS.length (sunVecVals y)))
+          case jacobianRepr of
+            DenseJacobian -> poke jac_ptr jac
+            SparseJacobian spat -> poke (castPtr jac_ptr) (T.SparseMatrix spat jac)
+          return 0
+      case getProblemType odeMethod of
+        Ode -> do
+          funptr <- ContT $ bracket (mkOdeJacobianC funIO) freeHaskellFunPtr
+          let funidaptr = nullFunPtr
+          return (funptr, funidaptr)
+        Residual -> do
+          let funptr = nullFunPtr
+          funidaptr <- ContT $ bracket (mkIDALsJacFn funIdaIO) freeHaskellFunPtr
+          return (funptr, funidaptr)
+
+  (c_event_fn, c_event_fn_ida) <-
     case odeEventConditions of
-      EventConditionsC fptr -> return fptr
+      EventConditionsC fptr -> do
+        case getProblemType odeMethod of
+          Ode -> do
+            let funptrida = nullFunPtr
+            return (fptr, funptrida)
+          Residual -> do
+            funptrida <- wrap_ide_event_condition fptr
+            return (nullFunPtr, funptrida)
       EventConditionsHaskell f -> do
       let
         funIO :: EventConditionCType
@@ -303,9 +467,70 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
                  -- Note: the following operation will force "res"
                  -- and discover any hidden exception
                  T.vectorToC (VS.unsafeCoerceVector res) (fromIntegral c_n_event_specs) out_ptr
-      funptr <- ContT $ bracket (mkEventConditionsC funIO) freeHaskellFunPtr
-      return funptr
+
+        -- TODO: the yp_ptr could be used in root functions
+        funIdaIO :: IDARootFn
+        funIdaIO t y_ptr _yp_ptr out_ptr _ptr = do
+              y <- sunVecVals <$> peek y_ptr
+
+              saveExceptionContext exceptionRef $ do
+                 res <- f (coerce t) (VS.unsafeCoerceVector y)
+                 -- FIXME: We should be able to use poke somehow
+                 -- Note: the following operation will force "res"
+                 -- and discover any hidden exception
+                 T.vectorToC (VS.unsafeCoerceVector res) (fromIntegral c_n_event_specs) out_ptr
+      case getProblemType odeMethod of
+        Ode -> do
+          funptr <- ContT $ bracket (mkEventConditionsC funIO) freeHaskellFunPtr
+          let funidaptr = nullFunPtr
+          return (funptr, funidaptr)
+        Residual -> do
+          let funptr = nullFunPtr
+          funidaptr <- ContT $ bracket (mkIDARootFn funIdaIO) freeHaskellFunPtr
+          return (funptr, funidaptr)
   return CConsts{..}
+
+-- | Wrapped to call the event condition directly from haskell code. This is
+-- used to wrap the event condition "ode" style in a "residual" style.
+foreign import ccall "dynamic"
+  runOdeEventCondition:: FunPtr EventConditionCType  -> EventConditionCType 
+
+-- | Convert event condition from "ode" to "residual" api.
+wrap_ide_event_condition :: FunPtr EventConditionCType -> ContT r IO (FunPtr IDARootFn)
+wrap_ide_event_condition funptr = do
+  let 
+        funIdaIO t y _yp res userdata = do
+          (runOdeEventCondition funptr) t y res userdata
+  funidaptr <- ContT $ bracket (mkIDARootFn funIdaIO) freeHaskellFunPtr
+  pure funidaptr
+
+-- | Wrapper to call the ode rhs directly from haskell code. This is used to
+-- compute the initial differential in IDA solving when they are not provided
+-- by the user.
+foreign import ccall "dynamic"
+  runOdeRhs :: FunPtr OdeRhsCType -> OdeRhsCType
+
+-- | Convert ode rhs to residual function
+wrap_ide_ode_rhs :: FunPtr OdeRhsCType -> ContT r IO (FunPtr IDAResFn)
+wrap_ide_ode_rhs funptr = do
+  let 
+        funIdaIO t y _yp res userdata = do
+          (runOdeRhs funptr) t y res userdata
+  funidaptr <- ContT $ bracket (mkIDAResFn funIdaIO) freeHaskellFunPtr
+  pure funidaptr
+
+foreign import ccall "dynamic"
+  runOdeJac :: FunPtr OdeJacobianCType -> OdeJacobianCType
+
+-- | Convert ode style jacobian function to residual
+wrap_ide_ode_jacobian :: FunPtr OdeJacobianCType -> ContT r IO (FunPtr IDALsJacFn)
+wrap_ide_ode_jacobian funptr = do
+  let 
+        funIdaIO t _cj y_ptr _yp_ptr r jac_ptr _userdata _tmp1 _tmp2 _tmp3 = do
+          (runOdeJac funptr) t y_ptr r jac_ptr _userdata _tmp1 _tmp2 _tmp3
+  funidaptr <- ContT $ bracket (mkIDALsJacFn funIdaIO) freeHaskellFunPtr
+  pure funidaptr
+
 
 -- | Ensure that the @io@ does not raise any exception.
 -- If it raises, save the exception in @exceptionRef@ and return an error code
@@ -329,5 +554,7 @@ saveExceptionContextM exceptionRef io = do
       pure (Just res)
     Left (e :: SomeException) -> do
       -- Save the exception
-      putMVar exceptionRef e
+      rr <- tryPutMVar exceptionRef e
+      when (not rr) $ do
+        putStrLn "weird, cannot put into the mvar"
       pure Nothing
