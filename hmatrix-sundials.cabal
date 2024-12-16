@@ -44,7 +44,6 @@ library
                        Numeric.Sundials.Common
                        Numeric.Sundials.MainLoop
                        Numeric.Sundials.Bindings.Sundials
-  c-sources:           src/helpers.c
   default-language:    Haskell2010
   default-extensions:  NondecreasingIndentation
                        LambdaCase
