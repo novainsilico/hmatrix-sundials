@@ -26,13 +26,13 @@ import Data.Void
 import Foreign
 import Foreign.C
 import GHC.Generics
-import GHC.Prim
 import GHC.Stack
 import Katip
 import Numeric.Sundials.Bindings.Sundials
 import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
 import Text.Printf (printf)
+import Data.Coerce (coerce)
 
 -- | Available methods for CVode
 data CVMethod
@@ -48,7 +48,7 @@ instance IsMethod CVMethod where
 foreign import ccall "wrapper"
   mkReport :: ReportErrorFnNew -> IO (FunPtr ReportErrorFnNew)
 
-solveC :: Ptr CInt -> CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CInt
+solveC :: Ptr CInt -> CConsts -> CVars (VS.MVector VSM.RealWorld) -> LogEnv -> IO CInt
 solveC _ptrStop CConsts {..} CVars {..} log_env =
   let report_error_new_api = wrapErrorNewApi (reportErrorWithKatip log_env)
       debug :: String -> StateT LoopState IO ()

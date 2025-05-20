@@ -10,7 +10,6 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Storable.Mutable as VSM
 import Numeric.LinearAlgebra.HMatrix as H hiding (Vector)
-import GHC.Prim
 import Control.DeepSeq
 import Katip
 import Data.Aeson
@@ -58,7 +57,7 @@ data CVars vec = CVars
     -- values. *Should be initialized with 0.*
   }
 
-allocateCVars :: OdeProblem -> IO (CVars (VS.MVector RealWorld))
+allocateCVars :: OdeProblem -> IO (CVars (VS.MVector VSM.RealWorld))
 allocateCVars OdeProblem{..} = do
   let dim = VS.length odeInitCond
   c_diagnostics <- VSM.new 11
@@ -77,7 +76,7 @@ allocateCVars OdeProblem{..} = do
   return CVars {..}
 
 -- NB: the mutable CVars must not be used after this
-freezeCVars :: CVars (VS.MVector RealWorld) -> IO (CVars VS.Vector)
+freezeCVars :: CVars (VS.MVector VSM.RealWorld) -> IO (CVars VS.Vector)
 freezeCVars CVars{..} = do
   c_diagnostics <- VS.unsafeFreeze c_diagnostics
   c_root_info <- VS.unsafeFreeze c_root_info

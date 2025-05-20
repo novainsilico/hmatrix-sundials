@@ -69,7 +69,6 @@ import qualified Data.Vector.Storable as VS
 import Data.Maybe
 import Data.Int
 import Numeric.LinearAlgebra.HMatrix as H hiding (Vector)
-import GHC.Prim
 import GHC.Generics
 import Control.Monad.IO.Class
 import Control.Monad.Cont
@@ -77,6 +76,8 @@ import Control.Exception
 import Foreign (alloca)
 import Control.Concurrent.Async
 import Control.Concurrent.MVar
+import Data.Vector.Mutable (RealWorld)
+import Data.Coerce (coerce)
 
 -- | A supported ODE solving method, either by CVode or ARKode
 data OdeMethod

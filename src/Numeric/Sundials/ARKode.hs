@@ -26,13 +26,14 @@ import Data.Void
 import Foreign
 import Foreign.C
 import GHC.Generics
-import GHC.Prim
 import GHC.Stack
 import Katip
 import Numeric.Sundials.Bindings.Sundials
 import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
 import Text.Printf (printf)
+import Data.Vector.Mutable (RealWorld)
+import Data.Coerce (coerce)
 
 -- | Available methods for ARKode
 data ARKMethod
