@@ -97,8 +97,8 @@ instance IsMethod ARKMethod where
 foreign import ccall "wrapper"
   mkReport :: ReportErrorFnNew -> IO (FunPtr ReportErrorFnNew)
 
-solveC :: Ptr CInt -> CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CInt
-solveC _ptrStop CConsts {..} CVars {..} log_env =
+solveC :: CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CInt
+solveC CConsts {..} CVars {..} log_env =
   let report_error_new_api = wrapErrorNewApi (reportErrorWithKatip log_env)
       debug :: String -> StateT LoopState IO ()
       debug _s = do

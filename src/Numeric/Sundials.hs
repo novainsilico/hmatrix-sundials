@@ -73,8 +73,6 @@ import GHC.Generics
 import Control.Monad.IO.Class
 import Control.Monad.Cont
 import Control.Exception
-import Foreign (alloca)
-import Control.Concurrent.Async
 import Control.Concurrent.MVar
 import Data.Vector.Mutable (RealWorld)
 import Data.Coerce (coerce)
@@ -140,50 +138,7 @@ solve opts =
         CVMethod{} -> CV.solveC
         ARKMethod{} -> ARK.solveC
 
-    -- This is the logic to implement interruptible solver.
-    -- The solving can be interrupted at each timepoint, it reads the `ptrStop`
-    -- value to know it needs to. So actually, if the
-    -- solver is stuck in an infinite loop for any reason, there is no
-    -- solution.
-    --
-    -- The idea is as follows:
-    --   - If no exception, the `solveC` function terminates and the `wait` is
-    --   returning the result.
-    --   - If any async exception happen, the `wait` is interrupted`, the
-    --   `exception handler` set `ptrStop to 1` and the exception bubble up to
-    --   the `withAsync` which will wait for completion of the `solveC`
-    --   function. (It will also raise an async exception which will be
-    --   rethrown immediately when leaving the FFI call.
-    --   
-    solveInterruptibleWrapper consts vars env = alloca $ \ptrStop -> do
-     -- Before running the thread, we want to ensure that it won't be stopped
-     -- immediately.
-     poke ptrStop 0
-
-     -- This is the solving action
-     let solvingAction = solveC ptrStop consts vars env
-
-     -- Here for the nasty concurrency logic
-     -- We want to ensure that in case of exception, the call `poke ptrStop 1`
-     -- in order to force the solver to stop.
-     --
-     -- Hence we mask exception the time required to setup correct exception handler
-     mask $ \restore -> do
-       -- Run the computation.
-       a <- async (restore solvingAction)
-
-       -- Now we wait for the computation to be terminated.
-       -- The exception handler is set outside of the wait, so we ensure that
-       -- either we never started the async, OR the exception handler is
-       -- correctly set.
-       --
-       -- The exception handler will first ask kindly the solver to stop by
-       -- setting ptrStop to 1 AND then wait for the stop. Note that we use
-       -- uninterruptibleCancel to force the stop / wait for it in order to
-       -- ensure that no blocked thread will be left over.
-       restore (wait a) `finally` (poke ptrStop 1 >> uninterruptibleCancel a)
-      
-  in solveCommon solveInterruptibleWrapper opts
+  in solveCommon solveC opts
 
 -- | The common solving logic between ARKode and CVode
 solveCommon
