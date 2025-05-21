@@ -160,8 +160,7 @@ solveC CConsts {..} CVars {..} log_env =
                     | otherwise = \c_rhs -> withARKStepCreate nullFunPtr c_rhs
               withArkStep c_rhs t0 y sunctx 8396 $ \cvode_mem -> do
                 -- /* Set the error handler */
-                cSUNContext_ClearErrHandlers sunctx >>= check 1093
-                cSUNContext_PushErrHandler sunctx c_report_error nullPtr >>= check 1093
+                setErrorHandler sunctx c_report_error
 
                 when (c_fixedstep > 0.0) $ do
                   cARKodeSetFixedStep cvode_mem c_fixedstep

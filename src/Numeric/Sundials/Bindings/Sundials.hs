@@ -29,12 +29,7 @@ withSUNContext :: (HasCallStack) => (SUNContext -> IO a) -> IO a
 withSUNContext cont = do
   alloca $ \ptr -> do
     let create = do
-          errCode <- cSUNContext_Create 0 ptr
-          when (errCode /= 0) $ do
-            errMsg <- cSUNGetErrMsg errCode
-            msg <- peekCString errMsg
-            error msg
-          pure ()
+          cSUNContext_Create 0 ptr >>= failOnError
         destroy = cSUNContext_Free ptr
     bracket_ create destroy $ do
       sunctx <- peek ptr
@@ -50,9 +45,23 @@ foreign import ccall "SUNGetErrMsg" cSUNGetErrMsg :: CInt -> IO CString
 -- remove all previous handler
 foreign import ccall "SUNContext_PushErrHandler" cSUNContext_PushErrHandler :: SUNContext -> FunPtr ReportErrorFnNew -> Ptr () -> IO CInt
 
-{-# WARNING cSUNContext_PushErrHandler "This function is dangerous because it adds an handler on top of previously existing handlers. It can hence results in duplicated logging messages as well as extra (e.g. not filtered by the specified handler). Be sure to call cSUNContext_ClearErrHandlers' before." #-}
+{-# WARNING cSUNContext_PushErrHandler "This function is dangerous because it adds an handler on top of previously existing handlers. It can hence results in duplicated logging messages as well as extra (e.g. not filtered by the specified handler). Be sure to call cSUNContext_ClearErrHandlers' before. Or call setErrorHandler" #-}
 
 foreign import ccall "SUNContext_ClearErrHandlers" cSUNContext_ClearErrHandlers :: SUNContext -> IO CInt
+
+failOnError :: CInt -> IO ()
+failOnError errCode = do
+  when (errCode /= 0) $ do
+    errMsg <- cSUNGetErrMsg errCode
+    msg <- peekCString errMsg
+    error msg
+
+
+-- | Set an error handler (and dispable the other ones)
+setErrorHandler :: SUNContext -> FunPtr ReportErrorFnNew -> IO ()
+setErrorHandler sunctx handler = do
+  cSUNContext_ClearErrHandlers sunctx >>= failOnError
+  cSUNContext_PushErrHandler sunctx handler nullPtr >>= failOnError
 
 -- * Vectors
 

@@ -110,8 +110,7 @@ solveC CConsts {..} CVars {..} log_env =
                 cCVodeInit cvode_mem c_rhs t0 y >>= check 1960
 
                 -- /* Set the error handler */
-                cSUNContext_ClearErrHandlers sunctx >>= check 1093
-                cSUNContext_PushErrHandler sunctx c_report_error nullPtr >>= check 1093
+                setErrorHandler sunctx c_report_error
 
                 when (c_fixedstep > 0.0) $ do
                   throwIO $ ReturnCodeWithMessage "fixedStep cannot be used with CVode" 6426
