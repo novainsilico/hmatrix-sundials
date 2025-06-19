@@ -255,11 +255,7 @@ main = do
     initLogEnv "test" "devel"
   let ?log_env = log_env
 
-  -- These tests are broken and we don't really understand why.
-  -- On "nova" fork, we don't care about ARKMethod, so we are fine
-  let Just broken_test_pattern = parseTestPattern "!/ARKMethod SDIRK_5_3_4.Events.Robertson.Canonical/&&!/ARKMethod TRBDF2_3_3_2.Accuracy tests.Simple sine/"
-
-  defaultMain $ {- localOption broken_test_pattern $ -} testGroup "Tests" $
+  defaultMain $ testGroup "Tests" $
     [idaTests] <>
     [
       testGroup solver_name
