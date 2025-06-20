@@ -185,9 +185,14 @@ solveC CConsts {..} CVars {..} log_env =
                   cARKodeSVtolerances cvode_mem c_rtol tv >>= check 6212
 
                   -- /* Specify the root function */
-                  cARKodeRootInit cvode_mem c_n_event_specs c_event_fn >>= check 6290
-                  -- /* Disable the inactive roots warning; see https://git.novadiscovery.net/jinko/jinko/-/issues/2368 */
-                  cARKodeSetNoInactiveRootWarn cvode_mem >>= check 6291
+                  when (c_n_event_specs /= 0) $ do
+                    cARKodeRootInit cvode_mem c_n_event_specs c_event_fn >>= check 6290
+
+                    -- Set the root direction
+                    VS.unsafeWith c_requested_event_direction $ \ptr -> do
+                      cARKodeSetRootDirection cvode_mem ptr >>= check 5678909876
+                    -- /* Disable the inactive roots warning; see https://git.novadiscovery.net/jinko/jinko/-/issues/2368 */
+                    cARKodeSetNoInactiveRootWarn cvode_mem >>= check 6291
 
                   -- /* Initialize a jacobian matrix and solver */
                   let withLinearSolver f
@@ -584,6 +589,8 @@ foreign import ccall "ARKodeSetMaxErrTestFails" cARKodeSetMaxErrTestFails :: ARK
 foreign import ccall "ARKodeSVtolerances" cARKodeSVtolerances :: ARKodeMem -> CDouble -> N_Vector -> IO CInt
 
 foreign import ccall "ARKodeRootInit" cARKodeRootInit :: ARKodeMem -> CInt -> FunPtr EventConditionCType -> IO CInt
+
+foreign import ccall "ARKodeSetRootDirection" cARKodeSetRootDirection :: ARKodeMem -> Ptr CInt -> IO CInt
 
 foreign import ccall "ARKodeSetNoInactiveRootWarn" cARKodeSetNoInactiveRootWarn :: ARKodeMem -> IO CInt
 

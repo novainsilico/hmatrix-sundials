@@ -134,10 +134,16 @@ solveC CConsts {..} CVars {..} log_env =
                   -- /* Specify the scalar relative tolerance and vector absolute tolerances */
                   cCVodeSVtolerances cvode_mem c_rtol tv >>= check 6212
 
+
                   -- /* Specify the root function */
-                  cCVodeRootInit cvode_mem c_n_event_specs c_event_fn >>= check 6290
-                  -- /* Disable the inactive roots warning; see https://git.novadiscovery.net/jinko/jinko/-/issues/2368 */
-                  cCVodeSetNoInactiveRootWarn cvode_mem >>= check 6291
+                  when (c_n_event_specs /= 0) $ do
+                    cCVodeRootInit cvode_mem c_n_event_specs c_event_fn >>= check 6290
+
+                    -- Set the root direction
+                    VS.unsafeWith c_requested_event_direction $ \ptr -> do
+                      cCVodeSetRootDirection cvode_mem ptr >>= check 5678909876
+                    -- /* Disable the inactive roots warning; see https://git.novadiscovery.net/jinko/jinko/-/issues/2368 */
+                    cCVodeSetNoInactiveRootWarn cvode_mem >>= check 6291
 
                   -- /* Initialize a jacobian matrix and solver */
                   let withLinearSolver f = do
@@ -502,6 +508,8 @@ foreign import ccall "CVodeSetMaxErrTestFails" cCVodeSetMaxErrTestFails :: CVode
 foreign import ccall "CVodeSVtolerances" cCVodeSVtolerances :: CVodeMem -> CDouble -> N_Vector -> IO CInt
 
 foreign import ccall "CVodeRootInit" cCVodeRootInit :: CVodeMem -> CInt -> FunPtr EventConditionCType -> IO CInt
+
+foreign import ccall "CVodeSetRootDirection" cCVodeSetRootDirection :: CVodeMem -> Ptr CInt -> IO CInt
 
 foreign import ccall "CVodeSetNoInactiveRootWarn" cCVodeSetNoInactiveRootWarn :: CVodeMem -> IO CInt
 
