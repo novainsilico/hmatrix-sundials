@@ -151,6 +151,9 @@ solveC _ptrStop CConsts {..} CVars {..} log_env =
                   VS.imapM_ (\i v -> cNV_Ith_S tv i v) c_atol
 
                   cCVodeSetMinStep cvode_mem c_minstep >>= check 6433
+                  case c_maxstep of
+                    Just max_step -> cCVodeSetMaxStep cvode_mem max_step >>= check 6434
+                    Nothing -> pure ()
                   cCVodeSetMaxNumSteps cvode_mem c_max_n_steps >>= check 9904
                   cCVodeSetMaxErrTestFails cvode_mem c_max_err_test_fails >>= check 2512
 
@@ -589,6 +592,8 @@ cNV_Ith_S' (N_Vector ptr) i = do
 foreign import ccall "CVodeSetUserData" cCVodeSetUserData :: CVodeMem -> Ptr UserData -> IO CInt
 
 foreign import ccall "CVodeSetMinStep" cCVodeSetMinStep :: CVodeMem -> CDouble -> IO CInt
+
+foreign import ccall "CVodeSetMaxStep" cCVodeSetMaxStep :: CVodeMem -> CDouble -> IO CInt
 
 foreign import ccall "CVodeSetMaxNumSteps" cCVodeSetMaxNumSteps :: CVodeMem -> SunIndexType -> IO CInt
 

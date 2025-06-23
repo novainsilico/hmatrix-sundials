@@ -101,6 +101,8 @@ instance IsMethod OdeMethod where
 data ODEOpts = ODEOpts {
     maxNumSteps :: Int32
   , minStep     :: Double
+  , maxStep     :: Maybe Double
+  -- ^ an optional max step size, the default value is +∞
   , fixedStep   :: Double
       -- ^ If this is greater than 0.0, then a fixed-size step is used.
       --
@@ -242,6 +244,7 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
     c_rtol = relTolerance odeTolerances
     c_atol = either (VS.replicate dim) id $ absTolerances odeTolerances
     c_minstep = coerce minStep
+    c_maxstep = coerce <$> maxStep
     c_fixedstep = coerce fixedStep
     c_max_n_steps = fromIntegral maxNumSteps
     c_max_err_test_fails = fromIntegral maxFail

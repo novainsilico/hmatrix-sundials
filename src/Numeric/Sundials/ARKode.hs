@@ -199,6 +199,9 @@ solveC _ptrStop CConsts {..} CVars {..} log_env =
                   VS.imapM_ (\i v -> cNV_Ith_S tv i v) c_atol
 
                   cARKodeSetMinStep cvode_mem c_minstep >>= check 6433
+                  case c_maxstep of
+                    Just max_step -> cARKodeSetMaxStep cvode_mem max_step >>= check 6434
+                    Nothing -> pure ()
                   cARKodeSetMaxNumSteps cvode_mem c_max_n_steps >>= check 9904
                   cARKodeSetMaxErrTestFails cvode_mem c_max_err_test_fails >>= check 2512
 
@@ -677,6 +680,8 @@ cNV_Ith_S' (N_Vector ptr) i = do
 foreign import ccall "ARKodeSetUserData" cARKodeSetUserData :: ARKodeMem -> Ptr UserData -> IO CInt
 
 foreign import ccall "ARKodeSetMinStep" cARKodeSetMinStep :: ARKodeMem -> CDouble -> IO CInt
+
+foreign import ccall "ARKodeSetMaxStep" cARKodeSetMaxStep :: ARKodeMem -> CDouble -> IO CInt
 
 foreign import ccall "ARKodeSetMaxNumSteps" cARKodeSetMaxNumSteps :: ARKodeMem -> SunIndexType -> IO CInt
 
