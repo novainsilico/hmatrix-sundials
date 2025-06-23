@@ -267,7 +267,7 @@ solveC _ptrStop CConsts {..} CVars {..} log_env =
                                               go 0 c_var_weight =<< cN_VGetArrayPointer weights
 
                                               VSM.write c_local_error_set 0 1
-                                            liftIO $ throwIO (ReturnCode 45)
+                                            liftIO $ throwIO $ ReturnCode (fromIntegral flag)
                                       else pure (t, flag)
 
                           --   /* Store the results for Haskell */
