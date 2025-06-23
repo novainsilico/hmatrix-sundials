@@ -193,12 +193,12 @@ data ReturnCode
 data LoopState = LoopState
   { -- output_ind tracks the current row into the c_output_mat matrix.
     -- if differs from input_ind because of the extra rows corresponding to events.
-    output_ind :: Int,
+    output_ind :: {-# UNPACK #-} !Int,
     -- input_ind tracks the current index into the c_sol_time array
-    input_ind :: Int,
+    input_ind :: {-# UNPACK #-} !Int,
     -- event_ind tracks the current event number
-    event_ind :: Int,
-    t_start :: CDouble
+    event_ind :: {-# UNPACK #-} !Int,
+    t_start :: {-# UNPACK #-} !CDouble
   }
   deriving (Show)
 
