@@ -451,9 +451,9 @@ maxStepTest opts0 = localOption (mkTimeout 1e5) $ testGroup "Max step"
       , odeSolTimes = [0,1 .. 10]
       , odeTolerances = defaultTolerances
       }
-        -- the RHS is a square signal of width = 1 time units. the solver can easily miss 
-        -- the discontinuity should it take large enough steps. With maxStep = 0.5, we force 
-        -- it to take small enough steps such that it cannot possibly miss it.
+    -- the RHS is a square signal of width = 1 time units. the solver can easily miss 
+    -- the discontinuity should it take large enough steps. With maxStep = 0.5, we force 
+    -- it to take small enough steps such that it cannot possibly miss it.
   | (maxStep, maxStepStr::String) <-
       [ (Nothing, "Nothing") -- solver will miss the RHS discontinuity
       , (Just 5e-1, "5e-1") -- it will not miss it because max_step is smaller than the discontinuity width
