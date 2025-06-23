@@ -125,6 +125,7 @@ data CConsts = CConsts
   , c_next_time_event :: IO CDouble
   , c_max_events :: CInt
   , c_minstep :: CDouble
+  , c_maxstep :: Maybe CDouble
   , c_fixedstep :: CDouble
   , c_max_n_steps :: SunIndexType
   , c_max_err_test_fails :: CInt

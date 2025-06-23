@@ -65,6 +65,7 @@ defaultOpts :: OdeMethod -> ODEOpts
 defaultOpts method = ODEOpts
   { maxNumSteps = 1e5
   , minStep     = 1.0e-14
+  , maxStep     = Nothing
   , fixedStep   = 0
   , maxFail     = 10
   , odeMethod   = method
@@ -265,6 +266,7 @@ main = do
           , noErrorTests opts
           , discontinuousRhsTest opts
           , modulusEventTest opts
+          , maxStepTest opts
           , cascadingEventsTest opts
           , simultaneousEventsTest opts
           , timeBasedEventTest opts
@@ -437,6 +439,31 @@ modulusEventTest opts0 = localOption (mkTimeout 1e5) $ testGroup "Modulus event"
       ,(Just (1 - 2**(-53)), "1-eps")]
   , record_event <- [False, True]
   , let opts = opts0 { initStep }
+  ]
+
+maxStepTest opts0 = localOption (mkTimeout 1e5) $ testGroup "Max step"
+  [ odeGoldenTest False opts (printf "maxStep=%s" maxStepStr) $
+      runKatipT ?log_env $ solve opts 
+      emptyOdeProblem
+      { odeRhs = odeRhsPure $ \t _ ->
+          if 5 <= t && t <= 6 then [1] else [0]
+      , odeInitCond = [0]
+      , odeSolTimes = [0,1 .. 10]
+      , odeTolerances = defaultTolerances
+      }
+        -- the RHS is a square signal of width = 1 time units. the solver can easily miss 
+        -- the discontinuity should it take large enough steps. With maxStep = 0.5, we force 
+        -- it to take small enough steps such that it cannot possibly miss it.
+  | (maxStep, maxStepStr::String) <-
+      [ (Nothing, "Nothing") -- solver will miss the RHS discontinuity
+      , (Just 5e-1, "5e-1") -- it will not miss it because max_step is smaller than the discontinuity width
+      ]
+  , let opts = 
+          opts0 
+          { maxStep
+          -- setting a voluntarily large init step such that the solver WILL miss the discontinuity if max step is not set
+          , initStep = Just 2
+          }
   ]
 
 cascadingEventsTest opts = odeGoldenTest True opts "Cascading_events" $ do
