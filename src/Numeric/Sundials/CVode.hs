@@ -26,12 +26,13 @@ import Data.Void
 import Foreign
 import Foreign.C
 import GHC.Generics
-import GHC.Prim
 import GHC.Stack
 import Katip
+import Numeric.Sundials.Bindings.Sundials
 import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
 import Text.Printf (printf)
+import Data.Coerce (coerce)
 
 -- | Available methods for CVode
 data CVMethod
@@ -44,37 +45,11 @@ instance IsMethod CVMethod where
   methodToInt BDF = cV_BDF
   methodType _ = Implicit
 
--- Tries to copy the previous semantic in C when we had:
-data ReturnCode
-  = -- return, with error code, skipping finish (diagnostics and cleanup)
-    ReturnCode Int
-  | -- return with log message, skipping finish (diags and cleanup)
-    ReturnCodeWithMessage String Int
-  | -- "goto" finish (do diag and cleanup)
-    Finish LoopState
-  | -- break the loop, hence go to finish (do diag and cleanup)
-    Break LoopState
-  deriving (Exception, Show)
-
--- | The loop state, most could be just carried by recursive function call, but
--- the C semantic was kinda interleaved, so doing that for now.
-data LoopState = LoopState
-  { -- output_ind tracks the current row into the c_output_mat matrix.
-    -- if differs from input_ind because of the extra rows corresponding to events.
-    output_ind :: Int,
-    -- input_ind tracks the current index into the c_sol_time array
-    input_ind :: Int,
-    -- event_ind tracks the current event number
-    event_ind :: Int,
-    t_start :: CDouble
-  }
-  deriving (Show)
-
 foreign import ccall "wrapper"
   mkReport :: ReportErrorFnNew -> IO (FunPtr ReportErrorFnNew)
 
-solveC :: Ptr CInt -> CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CInt
-solveC _ptrStop CConsts {..} CVars {..} log_env =
+solveC :: CConsts -> CVars (VS.MVector VSM.RealWorld) -> LogEnv -> IO CInt
+solveC CConsts {..} CVars {..} log_env =
   let report_error_new_api = wrapErrorNewApi (reportErrorWithKatip log_env)
       debug :: String -> StateT LoopState IO ()
       debug _s = do
@@ -122,7 +97,6 @@ solveC _ptrStop CConsts {..} CVars {..} log_env =
 
             -- /* Initialize data structures */
 
-
             -- /* Initialize odeMaxEventsReached to False */
             VSM.write c_diagnostics 10 0
 
@@ -136,8 +110,7 @@ solveC _ptrStop CConsts {..} CVars {..} log_env =
                 cCVodeInit cvode_mem c_rhs t0 y >>= check 1960
 
                 -- /* Set the error handler */
-                cSUNContext_ClearErrHandlers sunctx >>= check 1093
-                cSUNContext_PushErrHandler sunctx c_report_error nullPtr >>= check 1093
+                setErrorHandler sunctx c_report_error
 
                 when (c_fixedstep > 0.0) $ do
                   throwIO $ ReturnCodeWithMessage "fixedStep cannot be used with CVode" 6426
@@ -160,10 +133,16 @@ solveC _ptrStop CConsts {..} CVars {..} log_env =
                   -- /* Specify the scalar relative tolerance and vector absolute tolerances */
                   cCVodeSVtolerances cvode_mem c_rtol tv >>= check 6212
 
+
                   -- /* Specify the root function */
-                  cCVodeRootInit cvode_mem c_n_event_specs c_event_fn >>= check 6290
-                  -- /* Disable the inactive roots warning; see https://git.novadiscovery.net/jinko/jinko/-/issues/2368 */
-                  cCVodeSetNoInactiveRootWarn cvode_mem >>= check 6291
+                  when (c_n_event_specs /= 0) $ do
+                    cCVodeRootInit cvode_mem c_n_event_specs c_event_fn >>= check 6290
+
+                    -- Set the root direction
+                    VS.unsafeWith c_requested_event_direction $ \ptr -> do
+                      cCVodeSetRootDirection cvode_mem ptr >>= check 5678909876
+                    -- /* Disable the inactive roots warning; see https://git.novadiscovery.net/jinko/jinko/-/issues/2368 */
+                    cCVodeSetNoInactiveRootWarn cvode_mem >>= check 6291
 
                   -- /* Initialize a jacobian matrix and solver */
                   let withLinearSolver f = do
@@ -453,8 +432,6 @@ solveC _ptrStop CConsts {..} CVars {..} log_env =
 
       pure CV_SUCCESS
 
-foreign import ccall "SUNContext_PushErrHandler" cSUNContext_PushErrHandler :: SUNContext -> FunPtr ReportErrorFnNew -> Ptr () -> IO CInt
-
 --  |]
 
 {- Note [CV_TOO_CLOSE]
@@ -491,54 +468,10 @@ foreign import ccall "SUNContext_PushErrHandler" cSUNContext_PushErrHandler :: S
    later time.
 -}
 
--- An opaque pointer to a SUNContext
-newtype SUNContext = SUNContext (Ptr Void)
-  deriving newtype (Storable)
-
-foreign import ccall "SUNGetErrMsg" cSUNGetErrMsg :: CInt -> IO CString
-
-withSUNContext :: (HasCallStack) => (SUNContext -> IO a) -> IO a
-withSUNContext cont = do
-  alloca $ \ptr -> do
-    let create = do
-          errCode <- cSUNContext_Create 0 ptr
-          -- Exception safety here is a bit complex
-          -- Let's assume that nothing will happen here
-          when (errCode /= 0) $ do
-            errMsg <- cSUNGetErrMsg errCode
-            msg <- peekCString errMsg
-            error msg
-
-          -- Disable logging
-          pure ()
-        destroy = cSUNContext_Free ptr
-    bracket_ create destroy $ do
-      sunctx <- peek ptr
-
-      -- We force disable the logging mecanism
-      -- This stuff SPAMs stderr and generated exessive costs on our
-      -- infrastructure
-      alloca $ \loggerPtr -> do
-        errCode <- cSUNContext_GetLogger sunctx loggerPtr
-        when (loggerPtr == nullPtr || errCode /= 0) $ do
-          error $ "logger is incomplete"
-        logger <- peek loggerPtr
-
-        withCString "/dev/null" $ \devNull -> do
-          cSUNLogger_SetErrorFilename logger devNull
-          cSUNLogger_SetWarningFilename logger devNull
-          cSUNLogger_SetDebugFilename logger devNull
-          cSUNLogger_SetInfoFilename logger devNull
-          cont sunctx
-
 check :: (HasCallStack) => Int -> CInt -> IO ()
 check retCode status
   | status == CV_SUCCESS = pure ()
   | otherwise = throwIO (ReturnCode retCode)
-
-foreign import ccall "SUNContext_Create" cSUNContext_Create :: Int -> Ptr SUNContext -> IO CInt
-
-foreign import ccall "SUNContext_Free" cSUNContext_Free :: Ptr SUNContext -> IO CInt
 
 -- | An opaque pointer to a CVodeMem
 newtype CVodeMem = CVodeMem (Ptr Void)
@@ -561,34 +494,6 @@ foreign import ccall "CVodeFree" cCVodeFree :: Ptr CVodeMem -> IO ()
 
 foreign import ccall "CVodeInit" cCVodeInit :: CVodeMem -> FunPtr OdeRhsCType -> SunRealType -> N_Vector -> IO CInt
 
--- | An opaque pointer to an N_Vector
-newtype N_Vector = N_Vector (Ptr Void)
-
-foreign import ccall "N_VNew_Serial" unsafeN_VNew_Serial :: SunIndexType -> SUNContext -> IO N_Vector
-
-foreign import ccall "N_VDestroy" unsafeN_VDestroy :: N_Vector -> IO ()
-
-withNVector_Serial :: SunIndexType -> SUNContext -> Int -> (N_Vector -> IO a) -> IO a
-withNVector_Serial t suncontext errCode f = do
-  let create = do
-        res@(N_Vector ptr) <- unsafeN_VNew_Serial t suncontext
-        when (ptr == nullPtr) $ do
-          throwIO $ ReturnCodeWithMessage "Failure in N_VNew_Serial" errCode
-        pure res
-  bracket create unsafeN_VDestroy f
-
-cNV_Ith_S :: N_Vector -> Int -> CDouble -> IO ()
-cNV_Ith_S (N_Vector ptr) i v = do
-  qtr <- getContentPtr ptr
-  rtr <- getData qtr
-  pokeElemOff rtr i v
-
-cNV_Ith_S' :: N_Vector -> Int -> IO CDouble
-cNV_Ith_S' (N_Vector ptr) i = do
-  qtr <- getContentPtr ptr
-  rtr <- getData qtr
-  peekElemOff rtr i
-
 foreign import ccall "CVodeSetUserData" cCVodeSetUserData :: CVodeMem -> Ptr UserData -> IO CInt
 
 foreign import ccall "CVodeSetMinStep" cCVodeSetMinStep :: CVodeMem -> CDouble -> IO CInt
@@ -603,69 +508,13 @@ foreign import ccall "CVodeSVtolerances" cCVodeSVtolerances :: CVodeMem -> CDoub
 
 foreign import ccall "CVodeRootInit" cCVodeRootInit :: CVodeMem -> CInt -> FunPtr EventConditionCType -> IO CInt
 
+foreign import ccall "CVodeSetRootDirection" cCVodeSetRootDirection :: CVodeMem -> Ptr CInt -> IO CInt
+
 foreign import ccall "CVodeSetNoInactiveRootWarn" cCVodeSetNoInactiveRootWarn :: CVodeMem -> IO CInt
 
 foreign import ccall "CVodeSetLinearSolver" cCVodeSetLinearSolver :: CVodeMem -> SUNLinearSolver -> SUNMatrix -> IO CInt
 
 foreign import ccall "CVodeSetInitStep" cCVodeSetInitStep :: CVodeMem -> CDouble -> IO CInt
-
-foreign import ccall "SUNSparseMatrix" cSUNSparseMatrix :: SunIndexType -> SunIndexType -> CInt -> CInt -> SUNContext -> IO SUNMatrix
-
-foreign import ccall "SUNLinSol_KLU" cSUNLinSol_KLU :: N_Vector -> SUNMatrix -> SUNContext -> IO SUNLinearSolver
-
-foreign import ccall "SUNDenseMatrix" cSUNDenseMatrix :: SunIndexType -> SunIndexType -> SUNContext -> IO SUNMatrix
-
-foreign import ccall "SUNLinSol_Dense" cSUNLinSol_Dense :: N_Vector -> SUNMatrix -> SUNContext -> IO SUNLinearSolver
-
-foreign import ccall "SUNMatDestroy" cSUNMatDestroy :: SUNMatrix -> IO ()
-
-foreign import ccall "SUNLinSolFree" cSUNLinSolFree :: SUNLinearSolver -> IO CInt
-
-withSUNDenseMatrix :: (HasCallStack) => SunIndexType -> SunIndexType -> SUNContext -> CInt -> (SUNMatrix -> IO a) -> IO a
-withSUNDenseMatrix dim dim' sunctx errCode f = do
-  let create = do
-        mat@(SUNMatrix ptr) <- cSUNDenseMatrix dim dim' sunctx
-
-        when (ptr == nullPtr) $ do
-          throwIO $ ReturnCode $ fromIntegral errCode
-
-        pure mat
-  bracket create cSUNMatDestroy f
-
--- SUNLinSolFree ls
-
-withSUNSparseMatrix :: (HasCallStack) => SunIndexType -> SunIndexType -> CInt -> CInt -> SUNContext -> CInt -> (SUNMatrix -> IO a) -> IO a
-withSUNSparseMatrix dim dim' jac set sunctx errCode f = do
-  let create = do
-        mat@(SUNMatrix ptr) <- cSUNSparseMatrix dim dim' jac set sunctx
-
-        when (ptr == nullPtr) $ do
-          throwIO $ ReturnCode $ fromIntegral errCode
-
-        pure mat
-  bracket create cSUNMatDestroy f
-
-withSUNLinSol_Dense :: (HasCallStack) => N_Vector -> SUNMatrix -> SUNContext -> CInt -> (SUNLinearSolver -> IO a) -> IO a
-withSUNLinSol_Dense vec mat sunctx errCode f = do
-  let create = do
-        ls@(SUNLinearSolver ptr) <- cSUNLinSol_Dense vec mat sunctx
-
-        when (ptr == nullPtr) $ do
-          throwIO $ ReturnCode $ fromIntegral errCode
-
-        pure ls
-  bracket create cSUNLinSolFree f
-
-withSUNLinSol_KLU :: (HasCallStack) => N_Vector -> SUNMatrix -> SUNContext -> CInt -> (SUNLinearSolver -> IO a) -> IO a
-withSUNLinSol_KLU vec mat sunctx errCode f = do
-  let create = do
-        ls@(SUNLinearSolver ptr) <- cSUNLinSol_KLU vec mat sunctx
-
-        when (ptr == nullPtr) $ do
-          throwIO $ ReturnCode $ fromIntegral errCode
-
-        pure ls
-  bracket create cSUNLinSolFree f
 
 foreign import ccall "CVode" cCVode :: CVodeMem -> CDouble -> N_Vector -> Ptr CDouble -> CInt -> IO CInt
 
@@ -674,13 +523,6 @@ foreign import ccall "CVodeReInit" cCVodeReInit :: CVodeMem -> CDouble -> N_Vect
 foreign import ccall "CVodeGetRootInfo" cCVodeGetRootInfo :: CVodeMem -> Ptr CInt -> IO CInt
 
 foreign import ccall "CVodeSetJacFn" cCVodeSetJacFn :: CVodeMem -> FunPtr OdeJacobianCType -> IO CInt
-
--- | Opaque
-newtype SUNMatrix = SUNMatrix (Ptr Void)
-  deriving newtype (Storable)
-
-newtype SUNLinearSolver = SUNLinearSolver (Ptr Void)
-  deriving newtype (Storable)
 
 foreign import ccall "CVodeGetNumSteps" cCVodeGetNumSteps :: CVodeMem -> Ptr CLong -> IO CInt
 
@@ -709,20 +551,3 @@ cvGet getter cvode_mem = do
 foreign import ccall "CVodeGetEstLocalErrors" cCVodeGetEstLocalErrors :: CVodeMem -> N_Vector -> IO CInt
 
 foreign import ccall "CVodeGetErrWeights" cCVodeGetErrWeights :: CVodeMem -> N_Vector -> IO CInt
-
-foreign import ccall "SUNContext_ClearErrHandlers" cSUNContext_ClearErrHandlers :: SUNContext -> IO CInt
-
-foreign import ccall "N_VGetArrayPointer" cN_VGetArrayPointer :: N_Vector -> IO (Ptr CDouble)
-
--- * Logs
-newtype SUNLogger = SUNLogger (Ptr Void)
-  deriving newtype Storable
-
-foreign import ccall "SUNContext_GetLogger" cSUNContext_GetLogger :: SUNContext -> Ptr SUNLogger -> IO CInt
-
-foreign import ccall "SUNLogger_SetErrorFilename" cSUNLogger_SetErrorFilename :: SUNLogger -> CString -> IO ()
-foreign import ccall "SUNLogger_SetWarningFilename" cSUNLogger_SetWarningFilename :: SUNLogger -> CString -> IO ()
-foreign import ccall "SUNLogger_SetInfoFilename" cSUNLogger_SetInfoFilename :: SUNLogger -> CString -> IO ()
-foreign import ccall "SUNLogger_SetDebugFilename" cSUNLogger_SetDebugFilename :: SUNLogger -> CString -> IO ()
-
-

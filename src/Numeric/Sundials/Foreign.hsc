@@ -73,6 +73,13 @@ module Numeric.Sundials.Foreign
   , pattern ARK_SUCCESS
   , pattern ARK_TOO_CLOSE
 
+  , pattern IDA_NORMAL
+  , pattern IDA_ROOT_RETURN
+  , pattern IDA_SUCCESS
+  , pattern IDA_ILL_INPUT
+  , pattern IDA_Y_INIT
+  , pattern IDA_YA_YDP_INIT
+
   , getContentPtr, getData
   ) where
 
@@ -96,6 +103,7 @@ import Text.Printf (printf)
 #include <arkode/arkode.h>
 #include <arkode/arkode_arkstep.h>
 #include <cvode/cvode.h>
+#include <ida/ida.h>
 
 -- A version of #type that produces CDouble etc.
 -- https://github.com/haskell/hsc2hs/issues/51
@@ -382,3 +390,11 @@ pattern ARK_NORMAL = #const ARK_NORMAL
 pattern ARK_SUCCESS = #const ARK_SUCCESS
 pattern ARK_ROOT_RETURN = #const ARK_ROOT_RETURN
 pattern ARK_TOO_CLOSE = #const ARK_TOO_CLOSE
+
+pattern IDA_NORMAL, IDA_SUCCESS, IDA_ROOT_RETURN, IDA_ILL_INPUT, IDA_Y_INIT, IDA_YA_YDP_INIT :: CInt
+pattern IDA_NORMAL = #const IDA_NORMAL
+pattern IDA_SUCCESS = #const IDA_SUCCESS
+pattern IDA_ROOT_RETURN = #const IDA_ROOT_RETURN
+pattern IDA_ILL_INPUT = #const IDA_ILL_INPUT
+pattern IDA_Y_INIT = #const IDA_Y_INIT
+pattern IDA_YA_YDP_INIT = #const IDA_YA_YDP_INIT

@@ -7,4 +7,5 @@
     sundials_core = sundials;
     sundials_sunlinsolklu = sundials;
     sundials_sunmatrixsparse = sundials;
+    sundials_ida = sundials;
   }

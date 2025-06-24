@@ -9,8 +9,8 @@
 -- |
 -- Solution of ordinary differential equation (ODE) initial value problems.
 -- See <https://computation.llnl.gov/projects/sundials/sundials-software> for more detail.
-module Numeric.Sundials.ARKode
-  ( ARKMethod (..),
+module Numeric.Sundials.IDA
+  ( IDAMethod (..),
     solveC,
   )
 where
@@ -18,7 +18,6 @@ where
 import Control.Exception
 import Control.Monad (when)
 import Control.Monad.State
-import Data.Bool
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Storable.Mutable as VSM
@@ -32,72 +31,22 @@ import Numeric.Sundials.Bindings.Sundials
 import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
 import Text.Printf (printf)
-import Data.Vector.Mutable (RealWorld)
 import Data.Coerce (coerce)
+import Data.Bool (bool)
 
--- | Available methods for ARKode
-data ARKMethod
-  = SDIRK_2_1_2
-  | BILLINGTON_3_3_2
-  | TRBDF2_3_3_2
-  | KVAERNO_4_2_3
-  | ARK324L2SA_DIRK_4_2_3
-  | CASH_5_2_4
-  | CASH_5_3_4
-  | SDIRK_5_3_4
-  | KVAERNO_5_3_4
-  | ARK436L2SA_DIRK_6_3_4
-  | KVAERNO_7_4_5
-  | ARK548L2SA_DIRK_8_4_5
-  | HEUN_EULER_2_1_2
-  | BOGACKI_SHAMPINE_4_2_3
-  | ARK324L2SA_ERK_4_2_3
-  | ZONNEVELD_5_3_4
-  | ARK436L2SA_ERK_6_3_4
-  | SAYFY_ABURUB_6_3_4
-  | CASH_KARP_6_4_5
-  | FEHLBERG_6_4_5
-  | DORMAND_PRINCE_7_4_5
-  | ARK548L2SA_ERK_8_4_5
-  | VERNER_8_5_6
-  | FEHLBERG_13_7_8
+-- | Available methods for IDA
+data IDAMethod = IDADefault
   deriving (Eq, Ord, Show, Read, Generic, Bounded, Enum)
 
-instance IsMethod ARKMethod where
-  methodToInt SDIRK_2_1_2 = sDIRK_2_1_2
-  methodToInt BILLINGTON_3_3_2 = bILLINGTON_3_3_2
-  methodToInt TRBDF2_3_3_2 = tRBDF2_3_3_2
-  methodToInt KVAERNO_4_2_3 = kVAERNO_4_2_3
-  methodToInt ARK324L2SA_DIRK_4_2_3 = aRK324L2SA_DIRK_4_2_3
-  methodToInt CASH_5_2_4 = cASH_5_2_4
-  methodToInt CASH_5_3_4 = cASH_5_3_4
-  methodToInt SDIRK_5_3_4 = sDIRK_5_3_4
-  methodToInt KVAERNO_5_3_4 = kVAERNO_5_3_4
-  methodToInt ARK436L2SA_DIRK_6_3_4 = aRK436L2SA_DIRK_6_3_4
-  methodToInt KVAERNO_7_4_5 = kVAERNO_7_4_5
-  methodToInt ARK548L2SA_DIRK_8_4_5 = aRK548L2SA_DIRK_8_4_5
-  methodToInt HEUN_EULER_2_1_2 = hEUN_EULER_2_1_2
-  methodToInt BOGACKI_SHAMPINE_4_2_3 = bOGACKI_SHAMPINE_4_2_3
-  methodToInt ARK324L2SA_ERK_4_2_3 = aRK324L2SA_ERK_4_2_3
-  methodToInt ZONNEVELD_5_3_4 = zONNEVELD_5_3_4
-  methodToInt ARK436L2SA_ERK_6_3_4 = aRK436L2SA_ERK_6_3_4
-  methodToInt SAYFY_ABURUB_6_3_4 = sAYFY_ABURUB_6_3_4
-  methodToInt CASH_KARP_6_4_5 = cASH_KARP_6_4_5
-  methodToInt FEHLBERG_6_4_5 = fEHLBERG_6_4_5
-  methodToInt DORMAND_PRINCE_7_4_5 = dORMAND_PRINCE_7_4_5
-  methodToInt ARK548L2SA_ERK_8_4_5 = aRK548L2SA_ERK_8_4_5
-  methodToInt VERNER_8_5_6 = vERNER_8_5_6
-  methodToInt FEHLBERG_13_7_8 = fEHLBERG_13_7_8
+instance IsMethod IDAMethod where
+  methodToInt IDADefault = error "yoto"
 
-  methodType method =
-    if methodToInt method < mIN_DIRK_NUM
-      then Explicit
-      else Implicit
+  methodType _ = Implicit
 
 foreign import ccall "wrapper"
   mkReport :: ReportErrorFnNew -> IO (FunPtr ReportErrorFnNew)
 
-solveC :: CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CInt
+solveC :: CConsts -> CVars (VS.MVector VSM.RealWorld) -> LogEnv -> IO CInt
 solveC CConsts {..} CVars {..} log_env =
   let report_error_new_api = wrapErrorNewApi (reportErrorWithKatip log_env)
       debug :: String -> StateT LoopState IO ()
@@ -105,7 +54,7 @@ solveC CConsts {..} CVars {..} log_env =
         -- This SPAMs the logging system with a lot of informations, so we do
         -- not enable it by default
         -- Just comment in/out this line for now, we'll think about a nicer solution later
-        -- liftIO (debugMsgWithKatip log_env s)
+        -- liftIO (debugMsgWithKatip log_env _s)
         pure ()
    in do
         -- Allocate the error reporting callback
@@ -148,79 +97,85 @@ solveC CConsts {..} CVars {..} log_env =
 
             -- /* Initialize odeMaxEventsReached to False */
             VSM.write c_diagnostics 10 0
-            let implicit = c_method >= ARKODE_MIN_DIRK_NUM
 
             -- /* Create serial vector for solution */
-            withNVector_Serial c_dim sunctx 6896 $ \y -> do
+            withNVector_Serial c_dim sunctx 6896 $ \y -> withNVector_Serial c_dim sunctx 6896 $ \yp -> withNVector_Serial c_dim sunctx 6896 $ \ids -> do
               -- /* Specify initial condition */
               VS.imapM_ (\i v -> cNV_Ith_S y i v) c_init_cond
+              VS.imapM_ (\i v -> cNV_Ith_S yp i v) c_init_differentials
 
-              let withArkStep
-                    | not implicit = \c_rhs -> withARKStepCreate c_rhs nullFunPtr
-                    | otherwise = \c_rhs -> withARKStepCreate nullFunPtr c_rhs
-              withArkStep c_rhs t0 y sunctx 8396 $ \cvode_mem -> do
+              withIDACreate sunctx 8396 $ \ida_mem -> do
+                cIDAInit ida_mem c_ida_res t0 y yp >>= check 1234
                 -- /* Set the error handler */
                 setErrorHandler sunctx c_report_error
 
                 when (c_fixedstep > 0.0) $ do
-                  cARKodeSetFixedStep cvode_mem c_fixedstep
+                   throwIO $ ReturnCodeWithMessage "fixedStep cannot be used with IDA" 6426
 
                 -- /* Set the user data */
-                cARKodeSetUserData cvode_mem c_rhs_userdata >>= check 1949
+                cIDASetUserData ida_mem c_rhs_userdata >>= check 1949
 
                 -- /* Create serial vector for absolute tolerances */
                 withNVector_Serial c_dim sunctx 6471 $ \tv -> do
                   -- /* Specify tolerances */
                   VS.imapM_ (\i v -> cNV_Ith_S tv i v) c_atol
 
-                  cARKodeSetMinStep cvode_mem c_minstep >>= check 6433
+                  cIDASetMinStep ida_mem c_minstep >>= check 6433
                   case c_maxstep of
-                    Just max_step -> cARKodeSetMaxStep cvode_mem max_step >>= check 6434
+                    Just max_step -> cIDASetMaxStep ida_mem max_step >>= check 6434
                     Nothing -> pure ()
-                  cARKodeSetMaxNumSteps cvode_mem c_max_n_steps >>= check 9904
-                  cARKodeSetMaxErrTestFails cvode_mem c_max_err_test_fails >>= check 2512
+                  cIDASetMaxNumSteps ida_mem c_max_n_steps >>= check 9904
+                  cIDASetMaxErrTestFails ida_mem c_max_err_test_fails >>= check 2512
 
                   -- /* Specify the scalar relative tolerance and vector absolute tolerances */
-                  cARKodeSVtolerances cvode_mem c_rtol tv >>= check 6212
+                  cIDASVtolerances ida_mem c_rtol tv >>= check 6212
 
                   -- /* Specify the root function */
                   when (c_n_event_specs /= 0) $ do
-                    cARKodeRootInit cvode_mem c_n_event_specs c_event_fn >>= check 6290
+                    cIDARootInit ida_mem c_n_event_specs c_event_fn_ida >>= check 6290
 
                     -- Set the root direction
                     VS.unsafeWith c_requested_event_direction $ \ptr -> do
-                      cARKodeSetRootDirection cvode_mem ptr >>= check 5678909876
+                      cIDASetRootDirection ida_mem ptr >>= check 5678909876
                     -- /* Disable the inactive roots warning; see https://git.novadiscovery.net/jinko/jinko/-/issues/2368 */
-                    cARKodeSetNoInactiveRootWarn cvode_mem >>= check 6291
+                    cIDASetNoInactiveRootWarn ida_mem >>= check 6291
 
                   -- /* Initialize a jacobian matrix and solver */
-                  let withLinearSolver f
-                        | implicit = do
+                  let withLinearSolver f = do
                             if (c_sparse_jac /= 0)
                               then do
                                 withSUNSparseMatrix c_dim c_dim c_sparse_jac CSC_MAT sunctx 9061 $ \a -> do
                                   withSUNLinSol_KLU y a sunctx 9316 $ \ls -> do
                                     -- /* Attach matrix and linear solver */
-                                    cARKodeSetLinearSolver cvode_mem ls a >>= check 2625
+                                    cIDASetLinearSolver ida_mem ls a >>= check 2625
                                     f
                               else do
                                 withSUNDenseMatrix c_dim c_dim sunctx 9316 $ \a -> do
                                   withSUNLinSol_Dense y a sunctx 9316 $ \ls -> do
                                     -- /* Attach matrix and linear solver */
-                                    cARKodeSetLinearSolver cvode_mem ls a >>= check 2625
+                                    cIDASetLinearSolver ida_mem ls a >>= check 2625
                                     f
-                        | otherwise = f
 
                   withLinearSolver $ do
                     -- /* Set the initial step size if there is one */
                     when (c_init_step_size_set /= 0) $ do
                       --   /* FIXME: We could check if the initial step size is 0 */
                       --   /* or even NaN and then throw an error                 */
-                      cARKodeSetInitStep cvode_mem c_init_step_size >>= check 4010
+                      cIDASetInitStep ida_mem c_init_step_size >>= check 4010
 
                     -- /* Set the Jacobian if there is one */
-                    when (c_jac_set /= 0 && implicit) $ do
-                      cARKodeSetJacFn cvode_mem c_jac >>= check 3124
+                    when (c_jac_set /= 0) $ do
+                      cIDASetJacFn ida_mem c_jac_ida >>= check 3124
+
+                    VS.imapM_ (\i v -> cNV_Ith_S ids i v) c_is_differential
+                    cIDASetId ida_mem ids >>= check 6789
+
+                    first_time_event <- liftIO c_next_time_event
+                    -- if any of the value is algebraic, we try to setup the initial condition
+                    when (VS.any (==0.0) c_is_differential) $ do
+                      let ti = fromMaybe (error "Incorrect c_sol_time access") $ c_sol_time VS.!? 1
+                      res <- cIDACalcIC ida_mem IDA_YA_YDP_INIT (if first_time_event > t0 && not (isInfinite first_time_event) then first_time_event else ti)
+                      when (res /= IDA_SUCCESS) $ check (fromIntegral res) res
 
                     -- /* Store initial conditions */
                     VSM.write c_output_mat (0 * (fromIntegral c_dim + 1) + 0) (c_sol_time VS.! 0)
@@ -233,18 +188,10 @@ solveC CConsts {..} CVars {..} log_env =
 
                     c_ontimepoint (fromIntegral init_loop.output_ind)
 
-                    if implicit
-                      then do
-                        cARKStepSetTableNum cvode_mem c_method (-1) >>= check 26643
-                      else do
-                        cARKStepSetTableNum cvode_mem (-1) c_method >>= check 26643
-
-                    let loop :: StateT LoopState IO ()
-                        loop = do
+                    let loop :: CDouble -> StateT LoopState IO ()
+                        loop next_time_event = do
                           s <- get
                           let ti = fromMaybe (error "Incorrect c_sol_time access") $ c_sol_time VS.!? s.input_ind
-
-                          next_time_event <- liftIO c_next_time_event
 
                           --   // Haskell failure in the next time event function
                           when (next_time_event == -1) $ do
@@ -257,26 +204,43 @@ solveC CConsts {..} CVars {..} log_env =
                             liftIO $ throwIO $ Finish s
 
                           let next_stop_time = min ti next_time_event
-                          debug $ printf "Main loop iteration: t = %.17g (%a), next time point (ti) = %.17g, next time event = %.17g" (coerce s.t_start :: Double) (coerce ti :: Double) (coerce next_time_event :: Double)
+                          debug $ printf "Main loop iteration: t = %.17g, next time point (ti) = %.17g, next time event = %.17g" (coerce s.t_start :: Double) (coerce ti :: Double) (coerce next_time_event :: Double)
                           (t, flag) <- liftIO $ alloca $ \t_ptr -> do
-                            flag <- cARKodeEvolve cvode_mem next_stop_time y t_ptr ARK_NORMAL
-                            t <- peek t_ptr
-                            pure (t, flag)
+                            flag <- cIDASolve ida_mem next_stop_time t_ptr y yp IDA_NORMAL
+                            if flag == IDA_ILL_INPUT
+                            then do
+                              cIDAGetCurrentTime ida_mem t_ptr >>= check 123453
+                              t <- peek t_ptr
+                              if t == next_stop_time then
+                                -- This is an emulation of CV_TOO_CLOSE
+                                -- Which IDA do not support. We just catch the
+                                -- IDA_ILL_INPUT as well as comparing the t and
+                                -- hope for the best.
+                                pure (t, CV_TOO_CLOSE)
+                              else
+                                pure (t, IDA_ILL_INPUT)
 
-                          debug $ printf "ARKode returned %d; now t = %.17g\n" (fromIntegral flag :: Int) (coerce t :: Double)
-                          let root_based_event = flag == ARK_ROOT_RETURN
+                            else do
+                              t <- peek t_ptr
+                              pure (t, flag)
+
+
+                          debug $ printf "IDASolve returned %d; now t = %.17g\n" (fromIntegral flag :: Int) (coerce t :: Double)
+                          let root_based_event = flag == IDA_ROOT_RETURN
                           let time_based_event = t == next_time_event
+                          -- TODO: CV_TOO_CLOSE does not exists with IDA
+                          -- However, we have many uses cases where no solving was required
                           (t, _flag) <-
-                            if flag == ARK_TOO_CLOSE && not time_based_event
+                            if flag == CV_TOO_CLOSE && not time_based_event
                               then do
                                 --     /* See Note [CV_TOO_CLOSE]
                                 --        No solving was required; just set the time t manually and continue
                                 --        as if solving succeeded. */
-                                debug $ printf "Got ARK_TOO_CLOSE; no solving was required; proceeding to t = %.17g" (coerce next_stop_time :: Double)
+                                debug $ printf "Got CV_TOO_CLOSE; no solving was required; proceeding to t = %.17g" (coerce next_stop_time :: Double)
                                 pure (next_stop_time, flag)
                               else do
                                 s <- get
-                                if t == next_stop_time && t == s.t_start && flag == ARK_ROOT_RETURN && not time_based_event
+                                if t == next_stop_time && t == s.t_start && flag == IDA_ROOT_RETURN && not time_based_event
                                   then do
                                     --     /* See Note [CV_TOO_CLOSE]
                                     --        Probably the initial step size was set, and that's why we didn't
@@ -284,15 +248,15 @@ solveC CConsts {..} CVars {..} log_env =
                                     --        Pretend that the root didn't happen, lest we keep handling it
                                     --        forever. */
                                     debug $ ("Got a root but t == t_start == next_stop_time; pretending it didn't happen" :: String)
-                                    pure (t, ARK_SUCCESS)
+                                    pure (t, IDA_SUCCESS)
                                   else do
-                                    if not (flag == ARK_TOO_CLOSE && time_based_event) && flag < 0
+                                    if not (flag == CV_TOO_CLOSE && time_based_event) && flag < 0
                                       then do
                                         liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \ele -> do
                                           liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \weights -> do
-                                            local_errors_flag <- liftIO $ cARKodeGetEstLocalErrors cvode_mem ele
-                                            error_weights_flag <- liftIO $ cARKodeGetErrWeights cvode_mem weights
-                                            when (local_errors_flag == ARK_SUCCESS && error_weights_flag == ARK_SUCCESS) $ do
+                                            local_errors_flag <- liftIO $ cIDAGetEstLocalErrors ida_mem ele
+                                            error_weights_flag <- liftIO $ cIDAGetErrWeights ida_mem weights
+                                            when (local_errors_flag == IDA_SUCCESS && error_weights_flag == IDA_SUCCESS) $ do
                                               let go ix destination source
                                                     | ix == c_dim = pure ()
                                                     | otherwise = do
@@ -303,7 +267,7 @@ solveC CConsts {..} CVars {..} log_env =
                                               go 0 c_var_weight =<< cN_VGetArrayPointer weights
 
                                               VSM.write c_local_error_set 0 1
-                                            liftIO $ throwIO $ ReturnCode (fromIntegral flag)
+                                            liftIO $ throwIO (ReturnCode (fromIntegral flag))
                                       else pure (t, flag)
 
                           --   /* Store the results for Haskell */
@@ -340,9 +304,7 @@ solveC CConsts {..} CVars {..} log_env =
                                 else do
                                   debug ("Handling root-based events")
                                   liftIO $ VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
-                                    flag <- cARKodeGetRootInfo cvode_mem c_root_info_ptr
-                                    when (flag < 0) $ do
-                                      throwIO $ ReturnCode 2829
+                                    cIDAGetRootInfo ida_mem c_root_info_ptr >>= check 1235
                                     let go i n_events_triggered
                                           | i >= c_n_event_specs = pure n_events_triggered
                                           | otherwise = do
@@ -429,11 +391,7 @@ solveC CConsts {..} CVars {..} log_env =
 
                             when (n_events_triggered > 0 || time_based_event) $ do
                               debug ("Re-initializing the system")
-                              if not implicit
-                                then do
-                                  liftIO $ cARKStepReInit cvode_mem c_rhs nullFunPtr t y >>= check 1576
-                                else do
-                                  liftIO $ cARKStepReInit cvode_mem nullFunPtr c_rhs t y >>= check 1576
+                              liftIO $ cIDAReInit ida_mem t y yp >>= check 1576
 
                           when (t == ti) $ do
                             modify $ \s -> s {input_ind = s.input_ind + 1}
@@ -443,67 +401,60 @@ solveC CConsts {..} CVars {..} log_env =
                               liftIO $ throwIO $ Finish s
 
                           modify $ \s -> s {t_start = t}
-                          loop
-                    resM <- try $ execStateT loop init_loop
+
+                          next_time_event <- liftIO c_next_time_event
+                          loop next_time_event
+                    resM <- try $ execStateT (loop first_time_event) init_loop
                     case resM of
                       Left (ReturnCode c)
-                        | c == fromIntegral ARK_SUCCESS -> pure ARK_SUCCESS
+                        | c == fromIntegral IDA_SUCCESS -> pure IDA_SUCCESS
                         | otherwise -> pure $ (fromIntegral c)
                       Left (ReturnCodeWithMessage _message c)
-                        | c == fromIntegral ARK_SUCCESS -> pure ARK_SUCCESS
+                        | c == fromIntegral IDA_SUCCESS -> pure IDA_SUCCESS
                         | otherwise -> pure $ (fromIntegral c)
-                      Right finalState -> end cvode_mem finalState
-                      Left (Break finalState) -> end cvode_mem finalState
-                      Left (Finish finalState) -> end cvode_mem finalState
+                      Right finalState -> end ida_mem finalState
+                      Left (Break finalState) -> end ida_mem finalState
+                      Left (Finish finalState) -> end ida_mem finalState
   where
     end cvode_mem finalState = do
       -- /* The number of actual roots we found */
       VSM.write c_n_events 0 (fromIntegral finalState.event_ind)
 
       -- /* Get some final statistics on how the solve progressed */
-      nst <- cvGet cARKodeGetNumSteps cvode_mem
+      nst <- cvGet cIDAGetNumSteps cvode_mem
       VSM.write c_diagnostics 0 (fromIntegral nst)
 
-      nst_a <- cvGet cARKodeGetNumStepAttempts cvode_mem
+      -- This diagnostic is not available with IDA
+      let nst_a = 0 :: Int
       VSM.write c_diagnostics 1 (fromIntegral nst_a)
 
-      (nfe, nfi) <- alloca $ \nfe -> do
-        alloca $ \nfi -> do
-          errCode <- cARKStepGetNumRhsEvals cvode_mem nfe nfi
-          when (errCode /= ARK_SUCCESS) $ do
-            error $ "Failure during nfe/nfi get"
-
-          (,) <$> peek nfe <*> peek nfi
-
+   
+      nfe <- cvGet cIDAGetNumResEvals cvode_mem
       VSM.write c_diagnostics 2 (fromIntegral nfe)
+
+      -- This diagnostic is not available with IDA
+      let nfi = 0 :: Int
       VSM.write c_diagnostics 3 (fromIntegral nfi)
 
-      nsetups <- cvGet cARKodeGetNumLinSolvSetups cvode_mem
+      nsetups <- cvGet cIDAGetNumLinSolvSetups cvode_mem
       VSM.write c_diagnostics 4 (fromIntegral nsetups)
 
-      netf <- cvGet cARKodeGetNumErrTestFails cvode_mem
+      netf <- cvGet cIDAGetNumErrTestFails cvode_mem
       VSM.write c_diagnostics 5 (fromIntegral netf)
 
-      nni <- cvGet cARKodeGetNumNonlinSolvIters cvode_mem
+      nni <- cvGet cIDAGetNumNonlinSolvIters cvode_mem
       VSM.write c_diagnostics 6 (fromIntegral nni)
 
-      let implicit = c_method >= ARKODE_MIN_DIRK_NUM
-      if implicit
-        then do
-          ncfn <- cvGet cARKodeGetNumNonlinSolvConvFails cvode_mem
-          VSM.write c_diagnostics 7 (fromIntegral ncfn)
+      ncfn <- cvGet cIDAGetNumNonlinSolvConvFails cvode_mem
+      VSM.write c_diagnostics 7 (fromIntegral ncfn)
 
-          nje <- cvGet cARKodeGetNumJacEvals cvode_mem
-          VSM.write c_diagnostics 8 (fromIntegral nje)
+      nje <- cvGet cIDAGetNumJacEvals cvode_mem
+      VSM.write c_diagnostics 8 (fromIntegral nje)
 
-          nfeLS <- cvGet cARKodeGetNumLinRhsEvals cvode_mem
-          VSM.write c_diagnostics 9 (fromIntegral nfeLS)
-        else do
-          VSM.write c_diagnostics 7 0
-          VSM.write c_diagnostics 8 0
-          VSM.write c_diagnostics 9 0
+      nfeLS <- cvGet cIDAGetNumLinResEvals cvode_mem
+      VSM.write c_diagnostics 9 (fromIntegral nfeLS)
 
-      pure ARK_SUCCESS
+      pure IDA_SUCCESS
 
 --  |]
 
@@ -543,106 +494,101 @@ solveC CConsts {..} CVars {..} log_env =
 
 check :: (HasCallStack) => Int -> CInt -> IO ()
 check retCode status
-  | status == ARK_SUCCESS = pure ()
+  | status == IDA_SUCCESS = pure ()
   | otherwise = throwIO (ReturnCode retCode)
 
--- | An opaque pointer to a ARKodeMem
-newtype ARKodeMem = ARKodeMem (Ptr Void)
+-- | An opaque pointer to a IDAMem
+newtype IDAMem = IDAMem (Ptr Void)
   deriving newtype (Storable)
 
-withARKStepCreate ::
+withIDACreate ::
   (HasCallStack) =>
-  ( FunPtr OdeRhsCType ->
-    FunPtr OdeRhsCType ->
-    CDouble ->
-    N_Vector ->
-    SUNContext ->
+  ( SUNContext ->
     Int ->
-    (ARKodeMem -> IO c) ->
+    (IDAMem -> IO c) ->
     IO c
   )
-withARKStepCreate explicit implicit t0 y0 sunctx errCode f = do
+withIDACreate sunctx errCode f = do
   let create = do
-        res@(ARKodeMem ptr) <- cARKStepCreate explicit implicit t0 y0 sunctx
+        res@(IDAMem ptr) <- cIDACreate sunctx
         if ptr == nullPtr
-          then throwIO $ ReturnCodeWithMessage "Error in cvodeCreate" errCode
+          then throwIO $ ReturnCodeWithMessage "Error in IDACreate" errCode
           else pure res
       destroy p = do
-        with p cARKStepFree
+        with p cIDAFree
   bracket create destroy f
 
-foreign import ccall "ARKStepCreate" cARKStepCreate :: FunPtr OdeRhsCType -> FunPtr OdeRhsCType -> CDouble -> N_Vector -> SUNContext -> IO ARKodeMem
+foreign import ccall "IDACreate" cIDACreate :: SUNContext -> IO IDAMem
 
-foreign import ccall "ARKStepFree" cARKStepFree :: Ptr ARKodeMem -> IO ()
+foreign import ccall "IDAFree" cIDAFree :: Ptr IDAMem -> IO ()
 
-foreign import ccall "ARKodeSetUserData" cARKodeSetUserData :: ARKodeMem -> Ptr UserData -> IO CInt
+foreign import ccall "IDAInit" cIDAInit :: IDAMem -> FunPtr IDAResFn -> CDouble -> N_Vector -> N_Vector -> IO CInt
 
-foreign import ccall "ARKodeSetMinStep" cARKodeSetMinStep :: ARKodeMem -> CDouble -> IO CInt
+foreign import ccall "IDASetUserData" cIDASetUserData :: IDAMem -> Ptr UserData -> IO CInt
 
-foreign import ccall "ARKodeSetMaxStep" cARKodeSetMaxStep :: ARKodeMem -> CDouble -> IO CInt
+foreign import ccall "IDASetMinStep" cIDASetMinStep :: IDAMem -> CDouble -> IO CInt
 
-foreign import ccall "ARKodeSetMaxNumSteps" cARKodeSetMaxNumSteps :: ARKodeMem -> SunIndexType -> IO CInt
+foreign import ccall "IDASetMaxNumSteps" cIDASetMaxNumSteps :: IDAMem -> SunIndexType -> IO CInt
 
-foreign import ccall "ARKodeSetMaxErrTestFails" cARKodeSetMaxErrTestFails :: ARKodeMem -> CInt -> IO CInt
+foreign import ccall "IDASetMaxErrTestFails" cIDASetMaxErrTestFails :: IDAMem -> CInt -> IO CInt
 
-foreign import ccall "ARKodeSVtolerances" cARKodeSVtolerances :: ARKodeMem -> CDouble -> N_Vector -> IO CInt
+foreign import ccall "IDASVtolerances" cIDASVtolerances :: IDAMem -> CDouble -> N_Vector -> IO CInt
 
-foreign import ccall "ARKodeRootInit" cARKodeRootInit :: ARKodeMem -> CInt -> FunPtr EventConditionCType -> IO CInt
+foreign import ccall "IDARootInit" cIDARootInit :: IDAMem -> CInt -> FunPtr IDARootFn -> IO CInt
 
-foreign import ccall "ARKodeSetRootDirection" cARKodeSetRootDirection :: ARKodeMem -> Ptr CInt -> IO CInt
+foreign import ccall "IDASetRootDirection" cIDASetRootDirection :: IDAMem -> Ptr CInt -> IO CInt
 
-foreign import ccall "ARKodeSetNoInactiveRootWarn" cARKodeSetNoInactiveRootWarn :: ARKodeMem -> IO CInt
+foreign import ccall "IDASetNoInactiveRootWarn" cIDASetNoInactiveRootWarn :: IDAMem -> IO CInt
 
-foreign import ccall "ARKodeSetLinearSolver" cARKodeSetLinearSolver :: ARKodeMem -> SUNLinearSolver -> SUNMatrix -> IO CInt
+foreign import ccall "IDASetLinearSolver" cIDASetLinearSolver :: IDAMem -> SUNLinearSolver -> SUNMatrix -> IO CInt
 
-foreign import ccall "ARKodeSetInitStep" cARKodeSetInitStep :: ARKodeMem -> CDouble -> IO CInt
+foreign import ccall "IDASetInitStep" cIDASetInitStep :: IDAMem -> CDouble -> IO CInt
 
-foreign import ccall "ARKodeEvolve" cARKodeEvolve :: ARKodeMem -> CDouble -> N_Vector -> Ptr CDouble -> CInt -> IO CInt
+foreign import ccall "IDASolve" cIDASolve :: IDAMem -> CDouble -> Ptr CDouble -> N_Vector -> N_Vector -> CInt -> IO CInt
+foreign import ccall "IDAGetCurrentTime" cIDAGetCurrentTime :: IDAMem -> Ptr CDouble -> IO CInt
 
-foreign import ccall "ARKStepReInit"
-  cARKStepReInit ::
-    ARKodeMem ->
-    FunPtr OdeRhsCType ->
-    FunPtr a2 ->
+foreign import ccall "IDAReInit"
+  cIDAReInit ::
+    IDAMem ->
     CDouble ->
+    N_Vector ->
     N_Vector ->
     IO CInt
 
-foreign import ccall "ARKodeGetRootInfo" cARKodeGetRootInfo :: ARKodeMem -> Ptr CInt -> IO CInt
+foreign import ccall "IDAGetRootInfo" cIDAGetRootInfo :: IDAMem -> Ptr CInt -> IO CInt
 
-foreign import ccall "ARKodeSetJacFn" cARKodeSetJacFn :: ARKodeMem -> FunPtr OdeJacobianCType -> IO CInt
+foreign import ccall "IDASetJacFn" cIDASetJacFn :: IDAMem -> FunPtr IDALsJacFn -> IO CInt
 
-foreign import ccall "ARKodeSetFixedStep" cARKodeSetFixedStep :: ARKodeMem -> CDouble -> IO ()
+foreign import ccall "IDAGetNumSteps" cIDAGetNumSteps :: IDAMem -> Ptr CLong -> IO CInt
 
--- Note: the CInt are actually Enum and this could be enforced
-foreign import ccall "ARKStepSetTableNum" cARKStepSetTableNum :: ARKodeMem -> CInt -> CInt -> IO CInt
+foreign import ccall "IDAGetNumLinSolvSetups" cIDAGetNumLinSolvSetups :: IDAMem -> Ptr CLong -> IO CInt
 
-foreign import ccall "ARKodeGetNumSteps" cARKodeGetNumSteps :: ARKodeMem -> Ptr CLong -> IO CInt
+foreign import ccall "IDAGetNumErrTestFails" cIDAGetNumErrTestFails :: IDAMem -> Ptr CLong -> IO CInt
 
-foreign import ccall "ARKodeGetNumLinSolvSetups" cARKodeGetNumLinSolvSetups :: ARKodeMem -> Ptr CLong -> IO CInt
+foreign import ccall "IDAGetNumNonlinSolvIters" cIDAGetNumNonlinSolvIters :: IDAMem -> Ptr CLong -> IO CInt
 
-foreign import ccall "ARKodeGetNumErrTestFails" cARKodeGetNumErrTestFails :: ARKodeMem -> Ptr CLong -> IO CInt
+foreign import ccall "IDAGetNumNonlinSolvConvFails" cIDAGetNumNonlinSolvConvFails :: IDAMem -> Ptr CLong -> IO CInt
 
-foreign import ccall "ARKodeGetNumNonlinSolvIters" cARKodeGetNumNonlinSolvIters :: ARKodeMem -> Ptr CLong -> IO CInt
+foreign import ccall "IDAGetNumJacEvals" cIDAGetNumJacEvals :: IDAMem -> Ptr CLong -> IO CInt
 
-foreign import ccall "ARKodeGetNumNonlinSolvConvFails" cARKodeGetNumNonlinSolvConvFails :: ARKodeMem -> Ptr CLong -> IO CInt
+foreign import ccall "IDASetMaxStep" cIDASetMaxStep :: IDAMem -> CDouble -> IO CInt
 
-foreign import ccall "ARKodeGetNumJacEvals" cARKodeGetNumJacEvals :: ARKodeMem -> Ptr CLong -> IO CInt
+foreign import ccall "IDAGetNumResEvals" cIDAGetNumResEvals :: IDAMem -> Ptr CLong -> IO CInt
 
-foreign import ccall "ARKStepGetNumRhsEvals" cARKStepGetNumRhsEvals :: ARKodeMem -> Ptr CLong -> Ptr CLong -> IO CInt
+foreign import ccall "IDAGetNumLinResEvals" cIDAGetNumLinResEvals :: IDAMem -> Ptr CLong -> IO CInt
 
-foreign import ccall "ARKodeGetNumLinRhsEvals" cARKodeGetNumLinRhsEvals :: ARKodeMem -> Ptr CLong -> IO CInt
-
-foreign import ccall "ARKodeGetNumStepAttempts" cARKodeGetNumStepAttempts :: ARKodeMem -> Ptr CLong -> IO CInt
-
-cvGet :: (HasCallStack) => (Storable b) => (ARKodeMem -> Ptr b -> IO CInt) -> ARKodeMem -> IO b
+cvGet :: (HasCallStack) => (Storable b) => (IDAMem -> Ptr b -> IO CInt) -> IDAMem -> IO b
 cvGet getter cvode_mem = do
   alloca $ \ptr -> do
     err <- getter cvode_mem ptr
-    when (err /= ARK_SUCCESS) $ do
+    when (err /= IDA_SUCCESS) $ do
       error $ "Failure during cvGet"
     peek ptr
 
-foreign import ccall "ARKodeGetEstLocalErrors" cARKodeGetEstLocalErrors :: ARKodeMem -> N_Vector -> IO CInt
+foreign import ccall "IDAGetEstLocalErrors" cIDAGetEstLocalErrors :: IDAMem -> N_Vector -> IO CInt
 
-foreign import ccall "ARKodeGetErrWeights" cARKodeGetErrWeights :: ARKodeMem -> N_Vector -> IO CInt
+foreign import ccall "IDAGetErrWeights" cIDAGetErrWeights :: IDAMem -> N_Vector -> IO CInt
+
+foreign import ccall "IDACalcIC" cIDACalcIC :: IDAMem -> CInt -> CDouble -> IO CInt
+
+foreign import ccall "IDASetId" cIDASetId :: IDAMem -> N_Vector -> IO CInt
