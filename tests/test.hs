@@ -3,6 +3,7 @@
              ExistentialQuantification, LambdaCase, NumDecimals, NamedFieldPuns,
              TypeApplications, DeriveGeneric, StandaloneDeriving, FlexibleInstances, DeriveAnyClass #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
+{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 
 import Prelude hiding (quot, showList)
 
