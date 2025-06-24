@@ -558,7 +558,8 @@ saveExceptionContextM exceptionRef io = do
       pure (Just res)
     Left (e :: SomeException) -> do
       -- Save the exception
-      rr <- tryPutMVar exceptionRef e
-      when (not rr) $ do
-        putStrLn "weird, cannot put into the mvar"
+      -- Note: it is possible that an exception was already saved, we just discard it then
+      -- This seems to happen with IDA solver, when it fails, it will retry multiple times
+      -- TODO: maybe we can compare the exception and store a deduplicated list with more context?
+      _ <- tryPutMVar exceptionRef e
       pure Nothing
