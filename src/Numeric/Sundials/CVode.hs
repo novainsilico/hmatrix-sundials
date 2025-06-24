@@ -254,9 +254,9 @@ solveC _ptrStop CConsts {..} CVars {..} log_env =
                                       then do
                                         liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \ele -> do
                                           liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \weights -> do
-                                            flag <- liftIO $ cCVodeGetEstLocalErrors cvode_mem ele
-                                            flag' <- liftIO $ cCVodeGetErrWeights cvode_mem weights
-                                            when (flag == CV_SUCCESS && flag' == CV_SUCCESS) $ do
+                                            local_errors_flag <- liftIO $ cCVodeGetEstLocalErrors cvode_mem ele
+                                            error_weights_flag <- liftIO $ cCVodeGetErrWeights cvode_mem weights
+                                            when (local_errors_flag == CV_SUCCESS && error_weights_flag == CV_SUCCESS) $ do
                                               let go ix destination source
                                                     | ix == c_dim = pure ()
                                                     | otherwise = do

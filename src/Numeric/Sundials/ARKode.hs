@@ -310,9 +310,9 @@ solveC _ptrStop CConsts {..} CVars {..} log_env =
                                       then do
                                         liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \ele -> do
                                           liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \weights -> do
-                                            flag <- liftIO $ cARKodeGetEstLocalErrors cvode_mem ele
-                                            flag' <- liftIO $ cARKodeGetErrWeights cvode_mem weights
-                                            when (flag == ARK_SUCCESS && flag' == ARK_SUCCESS) $ do
+                                            local_errors_flag <- liftIO $ cARKodeGetEstLocalErrors cvode_mem ele
+                                            error_weights_flag <- liftIO $ cARKodeGetErrWeights cvode_mem weights
+                                            when (local_errors_flag == ARK_SUCCESS && error_weights_flag == ARK_SUCCESS) $ do
                                               let go ix destination source
                                                     | ix == c_dim = pure ()
                                                     | otherwise = do
