@@ -377,25 +377,29 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
               -- We don't care about differential informations
               let c_is_differential = mempty
               return (funptr, funidaptr, nullPtr, c_is_differential, mempty)
-    ResidualProblemFunctions ResidualFunctions{odeResidual=OdeResidual odeResidualF, ..} -> do
-          let
-            -- That's a correct residual function
-            funIdaResidualIO = fn
-              where 
-                fn t y yp residual _ptr = do
-                   -- Save the exception (if any)
-                   saveExceptionContext exceptionRef $ do
-                     sv <- peek y
-                     svp <- peek yp
-                     res <- odeResidualF t (sunVecVals sv) (sunVecVals svp)
+    ResidualProblemFunctions ResidualFunctions{..} -> do
+          (funidaptr, userdataptr) <- case odeResidual of
+             OdeResidualHaskell odeResidualF -> do
+              let
+                -- That's a correct residual function
+                funIdaResidualIO = fn
+                  where 
+                    fn t y yp residual _ptr = do
+                       -- Save the exception (if any)
+                       saveExceptionContext exceptionRef $ do
+                         sv <- peek y
+                         svp <- peek yp
+                         res <- odeResidualF t (sunVecVals sv) (sunVecVals svp)
 
-                     -- Note: the following operation will force "res"
-                     -- and discover any hidden exception
-                     poke residual $ SunVector { sunVecN = sunVecN sv
-                                        , sunVecVals = res
-                                        }
-          funidaptr <- ContT $ bracket (mkIDAResFn funIdaResidualIO) freeHaskellFunPtr
-          return (nullFunPtr, funidaptr, nullPtr, VS.unsafeCoerceVector odeDifferentials, VS.unsafeCoerceVector odeInitialDifferentials)
+                         -- Note: the following operation will force "res"
+                         -- and discover any hidden exception
+                         poke residual $ SunVector { sunVecN = sunVecN sv
+                                            , sunVecVals = res
+                                            }
+              funptr <- ContT $ bracket (mkIDAResFn funIdaResidualIO) freeHaskellFunPtr
+              pure (funptr, nullPtr)
+             OdeResidualC funptr userdataptr -> pure (funptr, userdataptr)
+          return (nullFunPtr, funidaptr, userdataptr, VS.unsafeCoerceVector odeDifferentials, VS.unsafeCoerceVector odeInitialDifferentials)
   let c_ontimepoint idx = do
         case odeOnTimePoint of
           Nothing -> pure ()

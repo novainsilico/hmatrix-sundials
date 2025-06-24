@@ -307,7 +307,7 @@ idaTests = testGroup "IDAsimple" $ [
     Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
                   { 
                      odeFunctions = ResidualProblemFunctions ResidualFunctions {
-                          odeResidual = OdeResidual $ \_t _y yp -> pure (VS.map (subtract 1) yp)
+                          odeResidual = OdeResidualHaskell $ \_t _y yp -> pure (VS.map (subtract 1) yp)
                           , odeDifferentials = VS.fromList [1.0]
                           , odeInitialDifferentials = VS.fromList [1.0]
                           }
@@ -322,7 +322,7 @@ idaTests = testGroup "IDAsimple" $ [
     Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
                   { 
                     odeFunctions = ResidualProblemFunctions ResidualFunctions {
-                              odeResidual = OdeResidual $ \_t y yp -> pure ([yp VS.! 0 - 1, y VS.! 0 + y VS.! 1])
+                              odeResidual = OdeResidualHaskell $ \_t y yp -> pure ([yp VS.! 0 - 1, y VS.! 0 + y VS.! 1])
                             , odeDifferentials = VS.fromList [0.0, 1.0]
                             , odeInitialDifferentials = VS.fromList [1.0, -1.0]
                               }

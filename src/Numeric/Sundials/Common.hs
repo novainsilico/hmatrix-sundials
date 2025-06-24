@@ -457,7 +457,8 @@ data OdeRhs
   | OdeRhsC (FunPtr OdeRhsCType) (Ptr UserData)
 
 data OdeResidual
-  = OdeResidual (CDouble -> VS.Vector CDouble -> VS.Vector CDouble -> IO (VS.Vector CDouble))
+  = OdeResidualHaskell (CDouble -> VS.Vector CDouble -> VS.Vector CDouble -> IO (VS.Vector CDouble))
+  | OdeResidualC (FunPtr IDAResFn) (Ptr UserData)
 
 -- | A version of 'OdeRhsHaskell' that accepts a pure function
 odeRhsPure
