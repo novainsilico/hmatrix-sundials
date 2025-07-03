@@ -78,7 +78,6 @@ import Control.Exception
 import Control.Concurrent.MVar
 import Data.Vector.Mutable (RealWorld)
 import Data.Coerce (coerce)
-import Control.Monad (when)
 import Numeric.Sundials.Bindings.Sundials (withSUNContext, withNVector_Serial, cNV_Ith_S, N_Vector (..))
 
 -- | A supported ODE solving method, either by CVode or ARKode
@@ -518,8 +517,22 @@ foreign import ccall "dynamic"
 wrap_ide_ode_rhs :: FunPtr OdeRhsCType -> ContT r IO (FunPtr IDAResFn)
 wrap_ide_ode_rhs funptr = do
   let 
-        funIdaIO t y _yp res userdata = do
-          (runOdeRhs funptr) t y res userdata
+        funIdaIO t y yp res userdata = do
+          -- The residual function is F(y, yp, t) = 0
+          -- However, we only have yp_rhs = f(y, t)
+          --
+          -- So we build F(y, yp, t) = yp_rhs - yp = f(y, t) - yp
+          ypVec <- peek yp
+          error_code <- (runOdeRhs funptr) t y res userdata
+          resVec <- peek res
+          let res' = VS.zipWith (-) (sunVecVals resVec) (sunVecVals ypVec)
+
+          poke res $ SunVector
+             { sunVecN = sunVecN resVec
+             , sunVecVals = VS.unsafeCoerceVector res'
+           }
+          pure error_code
+
   funidaptr <- ContT $ bracket (mkIDAResFn funIdaIO) freeHaskellFunPtr
   pure funidaptr
 

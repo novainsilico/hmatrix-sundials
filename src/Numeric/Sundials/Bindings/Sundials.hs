@@ -33,7 +33,27 @@ withSUNContext cont = do
         destroy = cSUNContext_Free ptr
     bracket_ create destroy $ do
       sunctx <- peek ptr
-      cont sunctx
+
+      -- We force disable the logging mecanism
+      -- This stuff SPAMs stderr and generated exessive costs on our
+      -- infrastructure
+
+      alloca $ \loggerPtr -> do
+        errCode <- cSUNContext_GetLogger sunctx loggerPtr
+
+        when (loggerPtr == nullPtr || errCode /= 0) $ do
+          error $ "logger is incomplete"
+
+        logger <- peek loggerPtr
+
+        withCString "/dev/null" $ \devNull -> do
+          pure ()
+          cSUNLogger_SetErrorFilename logger devNull
+          cSUNLogger_SetWarningFilename logger devNull
+          cSUNLogger_SetDebugFilename logger devNull
+          cSUNLogger_SetInfoFilename logger devNull
+
+          cont sunctx
 
 -- * Error handling
 
@@ -62,6 +82,19 @@ setErrorHandler :: SUNContext -> FunPtr ReportErrorFnNew -> IO ()
 setErrorHandler sunctx handler = do
   cSUNContext_ClearErrHandlers sunctx >>= failOnError
   cSUNContext_PushErrHandler sunctx handler nullPtr >>= failOnError
+
+-- * Logs
+
+newtype SUNLogger = SUNLogger (Ptr Void)
+  deriving newtype Storable
+
+foreign import ccall "SUNContext_GetLogger" cSUNContext_GetLogger :: SUNContext -> Ptr SUNLogger -> IO CInt
+
+
+foreign import ccall "SUNLogger_SetErrorFilename" cSUNLogger_SetErrorFilename :: SUNLogger -> CString -> IO ()
+foreign import ccall "SUNLogger_SetWarningFilename" cSUNLogger_SetWarningFilename :: SUNLogger -> CString -> IO ()
+foreign import ccall "SUNLogger_SetInfoFilename" cSUNLogger_SetInfoFilename :: SUNLogger -> CString -> IO ()
+foreign import ccall "SUNLogger_SetDebugFilename" cSUNLogger_SetDebugFilename :: SUNLogger -> CString -> IO ()
 
 -- * Vectors
 
