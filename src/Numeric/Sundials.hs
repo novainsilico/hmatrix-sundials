@@ -78,7 +78,6 @@ import Control.Exception
 import Control.Concurrent.MVar
 import Data.Vector.Mutable (RealWorld)
 import Data.Coerce (coerce)
-import Control.Monad (when)
 import Numeric.Sundials.Bindings.Sundials (withSUNContext, withNVector_Serial, cNV_Ith_S, N_Vector (..))
 
 -- | A supported ODE solving method, either by CVode or ARKode
