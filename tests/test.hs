@@ -291,7 +291,7 @@ main = do
     ]
 
 idaTests :: (?log_env::LogEnv) => TestTree
-idaTests = testGroup "IDAsimple" $ [
+idaTests = testGroup "IDASolver" $ [
   testCase "simple" $ do
     Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
                   { 
@@ -301,8 +301,9 @@ idaTests = testGroup "IDAsimple" $ [
                   , odeSolTimes = VS.fromList [0..10]
                   , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
                   }
-    print r
-    pure ()
+
+    -- dx/dt = 1, x(0) = 0 -> growing to 10
+    solutionMatrix r @=? fromColumns [VS.fromList [0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0]]
   ,testCase "residualsimple" $ do
     Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
                   { 
@@ -316,8 +317,8 @@ idaTests = testGroup "IDAsimple" $ [
                   , odeSolTimes = VS.fromList [0..10]
                   , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
                   }
-    print r
-    pure ()
+    -- dx/dt = 1, x(0) = 0 -> growing to 10
+    solutionMatrix r @=? fromColumns [VS.fromList [0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0]]
   ,testCase "residualadvanced" $ do
     Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
                   { 
@@ -331,8 +332,31 @@ idaTests = testGroup "IDAsimple" $ [
                   , odeSolTimes = VS.fromList [0..10]
                   , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
                   }
-    print r
-    pure ()
+    solutionMatrix r @=? fromColumns [
+       -- dx/dt = 1, x(0) = 0 -> growing to 10
+       VS.fromList [0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0],
+       -- y + x = 0 => y = -x
+       - VS.fromList [0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0]
+       ]
+  ,testCase "correctly register corrected initial value" $ do
+    -- The system is x - 2 = 0, hence x must be set to 2.
+    -- However we start with x = 3, so the final timeseries must contains x = 2 at t=0
+    Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
+                  { 
+                    odeFunctions = ResidualProblemFunctions ResidualFunctions {
+                              odeResidual = OdeResidualHaskell $ \_t y _yp -> pure ([y VS.! 0 - 2])
+                            , odeDifferentials = VS.fromList [0.0]
+                            , odeInitialDifferentials = VS.fromList [25.0]
+                              }
+                  , odeJacobian = Nothing
+                  , odeInitCond = [3]
+                  , odeSolTimes = VS.fromList [0..10]
+                  , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
+                  }
+    solutionMatrix r @?= fromColumns [
+       -- x - 2 = 0 => x = 2
+       VS.fromList [2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0]
+      ]
  ]
 
 
