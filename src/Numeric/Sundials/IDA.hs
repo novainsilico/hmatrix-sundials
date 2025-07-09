@@ -177,6 +177,14 @@ solveC CConsts {..} CVars {..} log_env =
                       res <- cIDACalcIC ida_mem IDA_YA_YDP_INIT (if first_time_event > t0 && not (isInfinite first_time_event) then first_time_event else ti)
                       when (res /= IDA_SUCCESS) $ check (fromIntegral res) res
 
+                      -- Update the initial vector with meaningful values
+                      -- Note: this is surprising that IDA does not seem to
+                      -- override by itself the y and yp values.
+                      --
+                      -- This is important to override 'y' here, because we
+                      -- store it in next block.
+                      cIDAGetConsistentIC ida_mem y yp >>= check 12345432
+
                     -- /* Store initial conditions */
                     VSM.write c_output_mat (0 * (fromIntegral c_dim + 1) + 0) (c_sol_time VS.! 0)
                     let go j
@@ -590,5 +598,7 @@ foreign import ccall "IDAGetEstLocalErrors" cIDAGetEstLocalErrors :: IDAMem -> N
 foreign import ccall "IDAGetErrWeights" cIDAGetErrWeights :: IDAMem -> N_Vector -> IO CInt
 
 foreign import ccall "IDACalcIC" cIDACalcIC :: IDAMem -> CInt -> CDouble -> IO CInt
+
+foreign import ccall "IDAGetConsistentIC" cIDAGetConsistentIC :: IDAMem -> N_Vector -> N_Vector -> IO CInt
 
 foreign import ccall "IDASetId" cIDASetId :: IDAMem -> N_Vector -> IO CInt
