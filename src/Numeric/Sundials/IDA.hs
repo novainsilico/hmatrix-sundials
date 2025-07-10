@@ -99,7 +99,7 @@ solveC CConsts {..} CVars {..} log_env =
             VSM.write c_diagnostics 10 0
 
             -- /* Create serial vector for solution */
-            withNVector_Serial c_dim sunctx 6896 $ \y -> withNVector_Serial c_dim sunctx 6896 $ \yp -> withNVector_Serial c_dim sunctx 6896 $ \ids -> do
+            withNVector_Serial c_dim sunctx 6896 $ \y -> withNVector_Serial c_dim sunctx 6896 $ \yp -> withNVector_Serial c_dim sunctx 6896 $ \ids -> withNVector_Serial c_dim sunctx 7777 $ \constraints -> do
               -- /* Specify initial condition */
               VS.imapM_ (\i v -> cNV_Ith_S y i v) c_init_cond
               VS.imapM_ (\i v -> cNV_Ith_S yp i v) c_init_differentials
@@ -169,6 +169,12 @@ solveC CConsts {..} CVars {..} log_env =
 
                     VS.imapM_ (\i v -> cNV_Ith_S ids i v) c_is_differential
                     cIDASetId ida_mem ids >>= check 6789
+
+                    case c_constraints of
+                      Nothing -> pure ()
+                      Just vec -> do
+                        VS.imapM_ (\i v -> cNV_Ith_S constraints i v) vec
+                        cIDASetConstraints ida_mem ids >>= check 6789
 
                     first_time_event <- liftIO c_next_time_event
                     -- if any of the value is algebraic, we try to setup the initial condition
@@ -602,3 +608,4 @@ foreign import ccall "IDACalcIC" cIDACalcIC :: IDAMem -> CInt -> CDouble -> IO C
 foreign import ccall "IDAGetConsistentIC" cIDAGetConsistentIC :: IDAMem -> N_Vector -> N_Vector -> IO CInt
 
 foreign import ccall "IDASetId" cIDASetId :: IDAMem -> N_Vector -> IO CInt
+foreign import ccall "IDASetConstraints" cIDASetConstraints :: IDAMem -> N_Vector -> IO CInt

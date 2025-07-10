@@ -287,7 +287,7 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
   -- Most of the not required values are set to dummy values. This is imperfect
   -- and unsafe, we just assume that the test coverage does correctly test
   -- theses cases.
-  (c_rhs, c_ida_res, c_rhs_userdata, c_is_differential, c_init_differentials) <- case odeFunctions of
+  (c_rhs, c_ida_res, c_rhs_userdata, c_is_differential, c_init_differentials, c_constraints) <- case odeFunctions of
     OdeProblemFunctions odeRhs -> do
       -- Estimation of the initial differentials, because not provided by the user
       let compute_initial_differentials c_rhs c_rhs_userdata = do
@@ -316,9 +316,9 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
               let c_is_differential = VS.replicate dim 1.0
               funptrida <- wrap_ide_ode_rhs ptr
               initDifferentials <- liftIO $ compute_initial_differentials ptr u
-              return (ptr, funptrida, u, c_is_differential, initDifferentials)
+              return (ptr, funptrida, u, c_is_differential, initDifferentials, Nothing)
             Ode -> do
-              return (ptr, nullFunPtr, u, mempty, mempty)
+              return (ptr, nullFunPtr, u, mempty, mempty, Nothing)
         OdeRhsHaskell fun -> do
           let
             funIO :: OdeRhsCType
@@ -368,14 +368,14 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
               -- If we don't know, let's assume that everything is differential
               let c_is_differential = VS.replicate dim 1.0
               initDifferentials <- liftIO $ compute_initial_differentials funptr nullPtr
-              return (funptr, funidaptr, nullPtr, c_is_differential, initDifferentials)
+              return (funptr, funidaptr, nullPtr, c_is_differential, initDifferentials, Nothing)
             Ode -> do
               -- We will solve an ode problem, we don't care about the ida implementation
               funptr <- ContT $ bracket (mkOdeRhsC funIO) freeHaskellFunPtr
               let funidaptr = nullFunPtr
               -- We don't care about differential informations
               let c_is_differential = mempty
-              return (funptr, funidaptr, nullPtr, c_is_differential, mempty)
+              return (funptr, funidaptr, nullPtr, c_is_differential, mempty, Nothing)
     ResidualProblemFunctions ResidualFunctions{..} -> do
           (funidaptr, userdataptr) <- case odeResidual of
              OdeResidualHaskell odeResidualF -> do
@@ -398,7 +398,7 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
               funptr <- ContT $ bracket (mkIDAResFn funIdaResidualIO) freeHaskellFunPtr
               pure (funptr, nullPtr)
              OdeResidualC funptr userdataptr -> pure (funptr, userdataptr)
-          return (nullFunPtr, funidaptr, userdataptr, VS.unsafeCoerceVector odeDifferentials, VS.unsafeCoerceVector odeInitialDifferentials)
+          return (nullFunPtr, funidaptr, userdataptr, VS.unsafeCoerceVector odeDifferentials, VS.unsafeCoerceVector odeInitialDifferentials, toConstraints <$> odeConstraints)
   let c_ontimepoint idx = do
         case odeOnTimePoint of
           Nothing -> pure ()
@@ -492,6 +492,17 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
           funidaptr <- ContT $ bracket (mkIDARootFn funIdaIO) freeHaskellFunPtr
           return (funptr, funidaptr)
   return CConsts{..}
+
+toConstraints :: V.Vector Constraint -> VS.Vector CDouble
+toConstraints constraints = VS.fromList $ map toConstraint (V.toList constraints)
+
+toConstraint :: Constraint -> CDouble
+toConstraint = \case
+  GreaterThanOrEqual0 -> 1
+  GreaterThan0 -> 2
+  LessThanOrEqual0 -> -1
+  LessThan0 -> -2
+  NoConstraint -> 0
 
 -- | Wrapped to call the event condition directly from haskell code. This is
 -- used to wrap the event condition "ode" style in a "residual" style.

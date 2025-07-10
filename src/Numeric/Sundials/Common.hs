@@ -149,6 +149,7 @@ data CConsts = CConsts
   , c_init_step_size_set :: CInt
   , c_init_step_size :: CDouble
   , c_ontimepoint :: TimePointHandler
+  , c_constraints :: Maybe (VS.Vector CDouble)
   }
 
 data MethodType = Explicit | Implicit
@@ -376,6 +377,13 @@ data ProblemFunctions =
       -- | When solving a "residual" problem, such as @f(t, v, v') = 0@
       ResidualProblemFunctions ResidualFunctions
 
+data Constraint
+  = GreaterThan0 | GreaterThanOrEqual0
+  | LessThan0 | LessThanOrEqual0
+  | NoConstraint
+  deriving (Show)
+
+
 -- | When solving a "residual" problem, such as @f(t, v, v') = 0@
 data ResidualFunctions = ResidualFunctions {
         odeResidual :: OdeResidual
@@ -388,6 +396,10 @@ data ResidualFunctions = ResidualFunctions {
       , odeInitialDifferentials :: (VS.Vector Double)
       -- ^ Only when solving with IDA, provides the initial derivatievs of the
       -- unknown. Will be computed by the solver if not provided.
+      , odeConstraints :: Maybe (V.Vector Constraint)
+      -- | Constraints for the different variables
+      -- 'Nothing' means no constraint'
+      -- Just (a vector only filled with 'NoConstraint') will fail.
     }
 
 data OdeProblem = OdeProblem
