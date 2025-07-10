@@ -123,6 +123,7 @@ data CConsts = CConsts
       -> CDouble -- time
       -> Ptr T.SunVector -- y
       -> Ptr T.SunVector -- new y
+      -> Ptr T.SunVector -- yp
       -> Ptr CInt -- (out) stop the solver?
       -> Ptr CInt -- (out) record the event?
       -> IO CInt
@@ -349,6 +350,7 @@ data EventHandlerResult = EventHandlerResult
 type EventHandler
   =  Double -- ^ time
   -> VS.Vector Double -- ^ values of the variables
+  -> VS.Vector Double -- ^ values of the derivatives of variables
   -> VS.Vector Int
     -- ^ Vector of triggered event indices.
     -- If the vector is empty, this is a time-based event.
@@ -520,6 +522,8 @@ type IDARootFn
 data EventConditions
   = EventConditionsHaskell (Double -> VS.Vector Double -> IO (VS.Vector Double))
   | EventConditionsC (FunPtr EventConditionCType)
+  | EventConditionsResidualHaskell (Double -> VS.Vector Double -> VS.Vector Double -> IO (VS.Vector Double))
+  | EventConditionsResidualC (FunPtr IDARootFn)
 
 -- | A way to construct 'EventConditionsHaskell' when there is no shared
 -- computation among different functions

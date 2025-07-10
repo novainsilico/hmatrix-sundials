@@ -232,15 +232,20 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
     c_n_event_specs = fromIntegral $ V.length odeEventDirections
     c_requested_event_direction = V.convert $ V.map directionToInt odeEventDirections
     -- TODO: this is not called from sundial, so the "C" wrapping is not mandatory
-    c_apply_event n_events event_indices_ptr t y_ptr y'_ptr stop_solver_ptr record_event_ptr = do
+    c_apply_event n_events event_indices_ptr t y_ptr y'_ptr yp_ptr stop_solver_ptr record_event_ptr = do
       event_indices <- vecFromPtr event_indices_ptr (fromIntegral n_events)
       y_vec <- peek y_ptr
+      yp_vec <- if yp_ptr == nullPtr then pure $ error "using yp for event in a solver not meant for"
+                                     else do
+                                        yp_vec <- peek yp_ptr
+                                        pure $ (VS.unsafeCoerceVector $ sunVecVals yp_vec :: VS.Vector Double)
       
       saveExceptionContext exceptionRef $ do
         EventHandlerResult{..} <-
           odeEventHandler
             (coerce t :: Double)
             (VS.unsafeCoerceVector $ sunVecVals y_vec :: VS.Vector Double)
+            yp_vec
             (VS.map fromIntegral event_indices :: VS.Vector Int)
         poke y'_ptr $ SunVector
           { sunVecN = sunVecN y_vec
@@ -456,42 +461,70 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
             let funptrida = nullFunPtr
             return (fptr, funptrida)
           Residual -> do
-            funptrida <- wrap_ide_event_condition fptr
+            funptrida <- wrap_ida_event_condition fptr
             return (nullFunPtr, funptrida)
       EventConditionsHaskell f -> do
+        let
+          funIO :: EventConditionCType
+          funIO t y_ptr out_ptr _ptr = do
+                y <- sunVecVals <$> peek y_ptr
+
+                saveExceptionContext exceptionRef $ do
+                   res <- f (coerce t) (VS.unsafeCoerceVector y)
+                   -- FIXME: We should be able to use poke somehow
+                   -- Note: the following operation will force "res"
+                   -- and discover any hidden exception
+                   T.vectorToC (VS.unsafeCoerceVector res) (fromIntegral c_n_event_specs) out_ptr
+
+          -- TODO: the yp_ptr could be used in root functions
+          funIdaIO :: IDARootFn
+          funIdaIO t y_ptr _yp_ptr out_ptr _ptr = do
+                y <- sunVecVals <$> peek y_ptr
+
+                saveExceptionContext exceptionRef $ do
+                   res <- f (coerce t) (VS.unsafeCoerceVector y)
+                   -- FIXME: We should be able to use poke somehow
+                   -- Note: the following operation will force "res"
+                   -- and discover any hidden exception
+                   T.vectorToC (VS.unsafeCoerceVector res) (fromIntegral c_n_event_specs) out_ptr
+        case getProblemType odeMethod of
+          Ode -> do
+            funptr <- ContT $ bracket (mkEventConditionsC funIO) freeHaskellFunPtr
+            let funidaptr = nullFunPtr
+            return (funptr, funidaptr)
+          Residual -> do
+            let funptr = nullFunPtr
+            funidaptr <- ContT $ bracket (mkIDARootFn funIdaIO) freeHaskellFunPtr
+            return (funptr, funidaptr)
+      EventConditionsResidualC fptr -> do
+        case getProblemType odeMethod of
+          Ode -> do
+            error "Cannot solve a system without IDA when the event condition requires yp"
+          Residual -> do
+            return (nullFunPtr, fptr)
+      EventConditionsResidualHaskell f -> do
       let
-        funIO :: EventConditionCType
-        funIO t y_ptr out_ptr _ptr = do
-              y <- sunVecVals <$> peek y_ptr
-
-              saveExceptionContext exceptionRef $ do
-                 res <- f (coerce t) (VS.unsafeCoerceVector y)
-                 -- FIXME: We should be able to use poke somehow
-                 -- Note: the following operation will force "res"
-                 -- and discover any hidden exception
-                 T.vectorToC (VS.unsafeCoerceVector res) (fromIntegral c_n_event_specs) out_ptr
-
-        -- TODO: the yp_ptr could be used in root functions
         funIdaIO :: IDARootFn
-        funIdaIO t y_ptr _yp_ptr out_ptr _ptr = do
+        funIdaIO t y_ptr yp_ptr out_ptr _ptr = do
               y <- sunVecVals <$> peek y_ptr
+              yp <- sunVecVals <$> peek yp_ptr
 
               saveExceptionContext exceptionRef $ do
-                 res <- f (coerce t) (VS.unsafeCoerceVector y)
+                 res <- f (coerce t) (VS.unsafeCoerceVector y) (VS.unsafeCoerceVector yp)
                  -- FIXME: We should be able to use poke somehow
                  -- Note: the following operation will force "res"
                  -- and discover any hidden exception
                  T.vectorToC (VS.unsafeCoerceVector res) (fromIntegral c_n_event_specs) out_ptr
       case getProblemType odeMethod of
         Ode -> do
-          funptr <- ContT $ bracket (mkEventConditionsC funIO) freeHaskellFunPtr
-          let funidaptr = nullFunPtr
-          return (funptr, funidaptr)
+          error "Cannot solve a system without IDA when the event condition requires yp"
         Residual -> do
           let funptr = nullFunPtr
           funidaptr <- ContT $ bracket (mkIDARootFn funIdaIO) freeHaskellFunPtr
           return (funptr, funidaptr)
+
   return CConsts{..}
+
 
 -- | Wrapped to call the event condition directly from haskell code. This is
 -- used to wrap the event condition "ode" style in a "residual" style.
@@ -499,8 +532,8 @@ foreign import ccall "dynamic"
   runOdeEventCondition:: FunPtr EventConditionCType  -> EventConditionCType 
 
 -- | Convert event condition from "ode" to "residual" api.
-wrap_ide_event_condition :: FunPtr EventConditionCType -> ContT r IO (FunPtr IDARootFn)
-wrap_ide_event_condition funptr = do
+wrap_ida_event_condition :: FunPtr EventConditionCType -> ContT r IO (FunPtr IDARootFn)
+wrap_ida_event_condition funptr = do
   let 
         funIdaIO t y _yp res userdata = do
           (runOdeEventCondition funptr) t y res userdata
