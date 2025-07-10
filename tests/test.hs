@@ -33,6 +33,7 @@ import GHC.Generics
 import Numeric.Sundials.Common (OdeResidual(..))
 import Numeric.Sundials.Common (ProblemFunctions(..))
 import Numeric.Sundials.Common (ResidualFunctions(..))
+import Numeric.Sundials.Common (Constraint(..))
 
 ----------------------------------------------------------------------
 --                            Helpers
@@ -311,6 +312,7 @@ idaTests = testGroup "IDASolver" $ [
                           odeResidual = OdeResidualHaskell $ \_t _y yp -> pure (VS.map (subtract 1) yp)
                           , odeDifferentials = VS.fromList [1.0]
                           , odeInitialDifferentials = VS.fromList [1.0]
+                          , odeConstraints = Nothing
                           }
                   , odeJacobian = Nothing
                   , odeInitCond = [0]
@@ -326,6 +328,7 @@ idaTests = testGroup "IDASolver" $ [
                               odeResidual = OdeResidualHaskell $ \_t y yp -> pure ([yp VS.! 0 - 1, y VS.! 0 + y VS.! 1])
                             , odeDifferentials = VS.fromList [0.0, 1.0]
                             , odeInitialDifferentials = VS.fromList [1.0, -1.0]
+                          , odeConstraints = Nothing
                               }
                   , odeJacobian = Nothing
                   , odeInitCond = [0, 0]
@@ -347,6 +350,7 @@ idaTests = testGroup "IDASolver" $ [
                               odeResidual = OdeResidualHaskell $ \_t y _yp -> pure ([y VS.! 0 - 2])
                             , odeDifferentials = VS.fromList [0.0]
                             , odeInitialDifferentials = VS.fromList [25.0]
+                            , odeConstraints = Nothing
                               }
                   , odeJacobian = Nothing
                   , odeInitCond = [3]
@@ -357,6 +361,147 @@ idaTests = testGroup "IDASolver" $ [
        -- x - 2 = 0 => x = 2
        VS.fromList [2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0]
       ]
+
+  , testGroup "constraints" $ [
+       testCase "leaking bucket" $ do
+         -- The system is x(0) = 5, dx/dt = -1, the bucket should leak and the value should be negative
+         Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
+                       { 
+                         odeFunctions = ResidualProblemFunctions ResidualFunctions {
+                                   odeResidual = OdeResidualHaskell $ \_t _y yp -> pure ([yp VS.! 0 + 1])
+                                 , odeDifferentials = VS.fromList [1.0]
+                                 , odeInitialDifferentials = VS.fromList [1.0]
+                                 , odeConstraints = Nothing
+                                   }
+                       , odeJacobian = Nothing
+                       , odeInitCond = [5.0]
+                       , odeSolTimes = VS.fromList [0..10]
+                       , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
+                       }
+         -- No constraint, it leaks
+         last (toRows (solutionMatrix r)) @?= VS.fromList [-5.0]
+         ,
+       testCase "leaking bucket constrained" $ do
+         -- The system is x(0) = 5, dx/dt = -1, the bucket should leak and the value is constrained to 0
+         Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
+                       { 
+                         odeFunctions = ResidualProblemFunctions ResidualFunctions {
+                                   odeResidual = OdeResidualHaskell $ \_t y yp -> pure ([yp VS.! 0 + if y VS.! 0 > 0 then 1 else 0])
+                                 , odeDifferentials = VS.fromList [1.0]
+                                 , odeInitialDifferentials = VS.fromList [1.0]
+                                 , odeConstraints = Just $ V.fromList [GreaterThanOrEqual0]
+                                   }
+                       , odeJacobian = Nothing
+                       , odeInitCond = [5.0]
+                       , odeSolTimes = VS.fromList [0..10]
+                       , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
+                       }
+         last (toRows (solutionMatrix r)) @?= VS.fromList [0.0]
+           ,
+       testCase "leaking bucket gt2 algebraic" $ do
+         -- The system is x(0) = 5, dx/dt = -1, the bucket should leak and the value should be constrained to 2
+         Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
+                       { 
+                         odeFunctions = ResidualProblemFunctions ResidualFunctions {
+                                   odeResidual = OdeResidualHaskell $ \_t y yp -> pure ([
+                                       -- dx/dt = -1 if x > 2 else 0
+                                       yp VS.! 0 + if y VS.! 0 > 2 then 1 else 0,
+                                       -- x >= 2
+                                       -- x - 2 >= 0
+                                       -- var = x - 2
+                                       -- x - 2 - var = 0
+                                       y VS.! 0 - 2 - y VS.! 1
+                                       ])
+                                 , odeDifferentials = VS.fromList [1.0, 0.0]
+                                 , odeInitialDifferentials = VS.fromList [-1.0, 0.0]
+                                 , odeConstraints = Just $ V.fromList [NoConstraint, GreaterThanOrEqual0]
+                                   }
+                       , odeJacobian = Nothing
+                       , odeInitCond = [5.0, 3.0]
+                       , odeSolTimes = VS.fromList [0..10]
+                       , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
+                       }
+         -- Not working yet, the constraint does not seem to apply on the algebraic term
+         last (toRows (solutionMatrix r)) @?= VS.fromList [2.0, 2.0]
+         ,
+       testCase "leaking bucket gt2 ode" $ do
+         -- The system is x(0) = 5, dx/dt = -1
+         -- it contains another system, y(0) = 3, dy/dt = -1, which is similar,
+         -- but with a constraint such that y >= 0
+         --
+         -- The system is x(0) = 5, dx/dt = -1, the bucket should leak and the value should be constrained to 2
+         Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
+                       { 
+                         odeFunctions = ResidualProblemFunctions ResidualFunctions {
+                                   odeResidual = OdeResidualHaskell $ \_t y yp -> pure ([
+                                       -- dx/dt = -1 if x > 2 else 0
+                                       yp VS.! 0 + if y VS.! 0 > 2 then 1 else 0,
+                                       -- dy/dt = -1 if x > 0 else 0
+                                       yp VS.! 1 + if y VS.! 1 > 0 then 1 else 0
+                                       ])
+                                 , odeDifferentials = VS.fromList [1.0, 1.0]
+                                 , odeInitialDifferentials = VS.fromList [-1.0, -1.0]
+                                 , odeConstraints = Just $ V.fromList [NoConstraint, GreaterThanOrEqual0]
+                                   }
+                       , odeJacobian = Nothing
+                       , odeInitCond = [5.0, 3.0]
+                       , odeSolTimes = VS.fromList [0..10]
+                       , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
+                       }
+
+         -- Not working yet, the constraint applies on second term, but
+         -- numerical weirdness does not lead to the same result on first term
+         last (toRows (solutionMatrix r)) @?= VS.fromList [2.0, 0.0]
+           ,
+       testCase "constrained algebraic positive" $ do
+         Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
+                       { 
+                         odeFunctions = ResidualProblemFunctions ResidualFunctions {
+                                   odeResidual = OdeResidualHaskell $ \_t y yp -> pure ([
+                                       -- dx/dt = 1
+                                       yp VS.! 0 -1,
+                                       -- x - abs(y) = 0
+                                       (y VS.! 0) - abs(y VS.! 1)
+                                       ])
+                                 , odeDifferentials = VS.fromList [1.0, 0.0]
+                                 , odeInitialDifferentials = VS.fromList [1.0, 0.0]
+                                 , odeConstraints = Just $ V.fromList [NoConstraint, GreaterThanOrEqual0]
+                                   }
+                       , odeJacobian = Nothing
+                       , odeInitCond = [0.0, 0.0]
+                       , odeSolTimes = VS.fromList [0..10]
+                       , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
+                       }
+         solutionMatrix r @?= fromColumns [
+            VS.fromList [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+            VS.fromList [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
+           ],
+       testCase "constrained algebraic negative" $ do
+         Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
+                       { 
+                         odeFunctions = ResidualProblemFunctions ResidualFunctions {
+                                   odeResidual = OdeResidualHaskell $ \_t y yp -> pure ([
+                                       -- dx/dt = 1
+                                       yp VS.! 0 -1,
+                                       -- x - abs(y) = 0
+                                       (y VS.! 0) - abs(y VS.! 1)
+                                       ])
+                                 , odeDifferentials = VS.fromList [1.0, 0.0]
+                                 , odeInitialDifferentials = VS.fromList [1.0, 0.0]
+                                 , odeConstraints = Just $ V.fromList [NoConstraint, LessThanOrEqual0]
+                                   }
+                       , odeJacobian = Nothing
+                       , odeInitCond = [0.0, 0.0]
+                       , odeSolTimes = VS.fromList [0..10]
+                       , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
+                       }
+
+         -- The constraint does not seems to apply on the albraic here
+         solutionMatrix r @?= fromColumns [
+            VS.fromList [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+            VS.fromList [0.0, -1.0, -2.0, -3.0, -4.0, -5.0, -6.0, -7.0, -8.0, -9.0, -10.0]
+           ]
+  ]
  ]
 
 
