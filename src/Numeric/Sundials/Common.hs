@@ -520,6 +520,8 @@ type IDARootFn
 data EventConditions
   = EventConditionsHaskell (Double -> VS.Vector Double -> IO (VS.Vector Double))
   | EventConditionsC (FunPtr EventConditionCType)
+  | EventConditionsResidualHaskell (Double -> VS.Vector Double -> VS.Vector Double -> IO (VS.Vector Double))
+  | EventConditionsResidualC (FunPtr IDARootFn)
 
 -- | A way to construct 'EventConditionsHaskell' when there is no shared
 -- computation among different functions
