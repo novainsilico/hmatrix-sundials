@@ -399,14 +399,10 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
               pure (funptr, nullPtr)
              OdeResidualC funptr userdataptr -> pure (funptr, userdataptr)
           return (nullFunPtr, funidaptr, userdataptr, VS.unsafeCoerceVector odeDifferentials, VS.unsafeCoerceVector odeInitialDifferentials)
-  let c_ontimepoint idx = do
+  let c_ontimepoint = do
         case odeOnTimePoint of
-          Nothing -> pure ()
-          Just fun -> do
-            -- Save the exception (if any)
-            _ <- saveExceptionContext exceptionRef $ do
-              fun idx
-            pure ()
+          Nothing -> \_idx -> pure ()
+          Just fun -> fun
   (c_jac, c_jac_ida) <-
     case odeJacobian of
       Nothing   -> return (nullFunPtr, nullFunPtr)

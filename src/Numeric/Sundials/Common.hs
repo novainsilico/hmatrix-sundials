@@ -355,7 +355,11 @@ type EventHandler
   -> IO EventHandlerResult
 
 -- | This callback will be called when a timepoint is saved
--- Maybe in the future we'll use this as a stream provider, but for now it is only used for debuging purpose.
+-- Maybe in the future we'll use this as a stream provider, but for now it is
+-- only used for debuging purpose.
+-- Note that this is NOT required anymore to build a stream abstraction,
+-- because the main loop is in haskell, so it can just stream the timepoint
+-- directly.
 type TimePointHandler
   =  CInt -- ^ timepoint index
   -> IO ()
@@ -419,6 +423,7 @@ data OdeProblem = OdeProblem
   , odeTolerances :: Tolerances
     -- ^ How much error is tolerated in each variable.
   , odeOnTimePoint :: Maybe TimePointHandler
+  -- ^ This is called everytime the solver stores a timepoint
   }
 
 data Tolerances = Tolerances
