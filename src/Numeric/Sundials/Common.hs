@@ -23,11 +23,7 @@ import Foreign.ForeignPtr
 -- | A collection of variables that we allocate on the Haskell side and
 -- pass into the C code to be filled.
 data CVars vec = CVars
-  { c_diagnostics :: vec SunIndexType
-    -- ^ Mutable vector to which we write diagnostic data while
-    -- solving. Its size corresponds to the number of fields in
-    -- 'SundialsDiagnostics'.
-  , c_root_info :: vec CInt
+  { c_root_info :: vec CInt
     -- ^ Just a temporary vector (of the size equal to the number of event
     -- specs) that we use to get root info. Isn't used for output.
   , c_event_index :: vec CInt
@@ -60,7 +56,6 @@ data CVars vec = CVars
 allocateCVars :: OdeProblem -> IO (CVars (VS.MVector VSM.RealWorld))
 allocateCVars OdeProblem{..} = do
   let dim = VS.length odeInitCond
-  c_diagnostics <- VSM.new 11
   c_root_info <- VSM.new $ V.length odeEventDirections
   c_event_index <- VSM.new odeMaxEvents
   c_event_time <- VSM.new odeMaxEvents
@@ -78,7 +73,6 @@ allocateCVars OdeProblem{..} = do
 -- NB: the mutable CVars must not be used after this
 freezeCVars :: CVars (VS.MVector VSM.RealWorld) -> IO (CVars VS.Vector)
 freezeCVars CVars{..} = do
-  c_diagnostics <- VS.unsafeFreeze c_diagnostics
   c_root_info <- VS.unsafeFreeze c_root_info
   c_event_index <- VS.unsafeFreeze c_event_index
   c_event_time <- VS.unsafeFreeze c_event_time
@@ -203,10 +197,10 @@ foreign import ccall "wrapper"
 
 assembleSolverResult
   :: OdeProblem
-  -> CInt
+  -> (CInt, SundialsDiagnostics)
   -> CVars VS.Vector
   -> IO (Either ErrorDiagnostics SundialsSolution)
-assembleSolverResult OdeProblem{..} ret CVars{..} = do
+assembleSolverResult OdeProblem{..} (ret, diagnostics) CVars{..} = do
   let
     dim = VS.length odeInitCond
     n_rows = fromIntegral . VS.head $ c_n_rows
@@ -215,18 +209,6 @@ assembleSolverResult OdeProblem{..} ret CVars{..} = do
       if c_local_error_set VS.! 0 == 0
         then (mempty, mempty)
         else (VS.unsafeCoerceVector c_local_error, VS.unsafeCoerceVector c_var_weight)
-    diagnostics = SundialsDiagnostics
-      (fromIntegral $ c_diagnostics VS.!0)
-      (fromIntegral $ c_diagnostics VS.!1)
-      (fromIntegral $ c_diagnostics VS.!2)
-      (fromIntegral $ c_diagnostics VS.!3)
-      (fromIntegral $ c_diagnostics VS.!4)
-      (fromIntegral $ c_diagnostics VS.!5)
-      (fromIntegral $ c_diagnostics VS.!6)
-      (fromIntegral $ c_diagnostics VS.!7)
-      (fromIntegral $ c_diagnostics VS.!8)
-      (fromIntegral $ c_diagnostics VS.!9)
-      (toEnum . fromIntegral $ c_diagnostics VS.! 10)
   return $
     if ret == T.cV_SUCCESS
       then

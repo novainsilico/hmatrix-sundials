@@ -33,6 +33,7 @@ import Numeric.Sundials.Foreign
 import Text.Printf (printf)
 import Data.Coerce (coerce)
 import Data.Bool (bool)
+import Data.IORef (newIORef, writeIORef, readIORef)
 
 -- | Available methods for IDA
 data IDAMethod = IDADefault
@@ -46,7 +47,7 @@ instance IsMethod IDAMethod where
 foreign import ccall "wrapper"
   mkReport :: ReportErrorFnNew -> IO (FunPtr ReportErrorFnNew)
 
-solveC :: CConsts -> CVars (VS.MVector VSM.RealWorld) -> LogEnv -> IO CInt
+solveC :: CConsts -> CVars (VS.MVector VSM.RealWorld) -> LogEnv -> IO (CInt, SundialsDiagnostics)
 solveC CConsts {..} CVars {..} log_env =
   let report_error_new_api = wrapErrorNewApi (reportErrorWithKatip log_env)
       debug :: String -> StateT LoopState IO ()
@@ -96,7 +97,7 @@ solveC CConsts {..} CVars {..} log_env =
             -- /* Initialize data structures */
 
             -- /* Initialize odeMaxEventsReached to False */
-            VSM.write c_diagnostics 10 0
+            odeMaxEventsReached <- newIORef False
 
             -- /* Create serial vector for solution */
             withNVector_Serial c_dim sunctx 6896 $ \y -> withNVector_Serial c_dim sunctx 6896 $ \yp -> withNVector_Serial c_dim sunctx 6896 $ \ids -> do
@@ -389,7 +390,7 @@ solveC CConsts {..} CVars {..} log_env =
                               if (fromIntegral s.event_ind >= c_max_events)
                                 then do
                                   debug ("Reached max_events; returning")
-                                  VSM.write c_diagnostics 10 1
+                                  liftIO $ writeIORef odeMaxEventsReached True
                                   pure 1
                                 else pure stop_solver
                             when (stop_solver /= 0) $ do
@@ -415,54 +416,59 @@ solveC CConsts {..} CVars {..} log_env =
                     resM <- try $ execStateT (loop first_time_event) init_loop
                     case resM of
                       Left (ReturnCode c)
-                        | c == fromIntegral IDA_SUCCESS -> pure IDA_SUCCESS
-                        | otherwise -> pure $ (fromIntegral c)
+                        | c == fromIntegral IDA_SUCCESS -> pure (IDA_SUCCESS, mempty)
+                        | otherwise -> pure $ (fromIntegral c, mempty)
                       Left (ReturnCodeWithMessage _message c)
-                        | c == fromIntegral IDA_SUCCESS -> pure IDA_SUCCESS
-                        | otherwise -> pure $ (fromIntegral c)
-                      Right finalState -> end ida_mem finalState
-                      Left (Break finalState) -> end ida_mem finalState
-                      Left (Finish finalState) -> end ida_mem finalState
+                        | c == fromIntegral IDA_SUCCESS -> pure (IDA_SUCCESS, mempty)
+                        | otherwise -> pure $ (fromIntegral c, mempty)
+                      Right finalState -> end ida_mem odeMaxEventsReached finalState
+                      Left (Break finalState) -> end ida_mem odeMaxEventsReached finalState
+                      Left (Finish finalState) -> end ida_mem odeMaxEventsReached finalState
   where
-    end cvode_mem finalState = do
+    end cvode_mem odeMaxEventsReached finalState = do
       -- /* The number of actual roots we found */
       VSM.write c_n_events 0 (fromIntegral finalState.event_ind)
 
       -- /* Get some final statistics on how the solve progressed */
       nst <- cvGet cIDAGetNumSteps cvode_mem
-      VSM.write c_diagnostics 0 (fromIntegral nst)
 
       -- This diagnostic is not available with IDA
       let nst_a = 0 :: Int
-      VSM.write c_diagnostics 1 (fromIntegral nst_a)
 
    
       nfe <- cvGet cIDAGetNumResEvals cvode_mem
-      VSM.write c_diagnostics 2 (fromIntegral nfe)
 
       -- This diagnostic is not available with IDA
       let nfi = 0 :: Int
-      VSM.write c_diagnostics 3 (fromIntegral nfi)
 
       nsetups <- cvGet cIDAGetNumLinSolvSetups cvode_mem
-      VSM.write c_diagnostics 4 (fromIntegral nsetups)
 
       netf <- cvGet cIDAGetNumErrTestFails cvode_mem
-      VSM.write c_diagnostics 5 (fromIntegral netf)
 
       nni <- cvGet cIDAGetNumNonlinSolvIters cvode_mem
-      VSM.write c_diagnostics 6 (fromIntegral nni)
 
       ncfn <- cvGet cIDAGetNumNonlinSolvConvFails cvode_mem
-      VSM.write c_diagnostics 7 (fromIntegral ncfn)
 
       nje <- cvGet cIDAGetNumJacEvals cvode_mem
-      VSM.write c_diagnostics 8 (fromIntegral nje)
 
       nfeLS <- cvGet cIDAGetNumLinResEvals cvode_mem
-      VSM.write c_diagnostics 9 (fromIntegral nfeLS)
 
-      pure IDA_SUCCESS
+      maxEventReached <- readIORef odeMaxEventsReached
+
+      let diagnostics = SundialsDiagnostics
+             (fromIntegral $ nst)
+             (fromIntegral $ nst_a)
+             (fromIntegral $ nfe)
+             (fromIntegral $ nfi)
+             (fromIntegral $ nsetups)
+             (fromIntegral $ netf)
+             (fromIntegral $ nni)
+             (fromIntegral $ ncfn)
+             (fromIntegral $ nje)
+             (fromIntegral $ nfeLS)
+             maxEventReached
+
+      pure (IDA_SUCCESS, diagnostics)
 
 --  |]
 

@@ -151,7 +151,7 @@ solve opts =
 -- | The common solving logic between ARKode and CVode
 solveCommon
   :: (Katip m)
-  => (CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CInt)
+  => (CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO (CInt, SundialsDiagnostics))
       -- ^ the CVode/ARKode solving function; mostly inline-C code
   -> ODEOpts
   -> OdeProblem
@@ -171,10 +171,10 @@ solveCommon solve_c opts problem@(OdeProblem{..})
     log_env <- getLogEnv
     liftIO $ do -- the rest is in the IO monad
     vars <- allocateCVars problem
-    ret <- withCConsts opts problem $ \consts ->
+    result <- withCConsts opts problem $ \consts ->
       solve_c consts vars log_env
     frozenVars <- freezeCVars vars
-    assembleSolverResult problem ret frozenVars
+    assembleSolverResult problem result frozenVars
 
 -- | Classify the method required as if it is ode or residual
 data ProblemType =
