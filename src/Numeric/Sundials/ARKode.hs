@@ -160,7 +160,7 @@ solveC CConsts {..} CVars {..} log_env =
                     | not implicit = \c_rhs -> withARKStepCreate c_rhs nullFunPtr
                     | otherwise = \c_rhs -> withARKStepCreate nullFunPtr c_rhs
               withArkStep c_rhs t0 y sunctx 8396 $ \cvode_mem -> do
-                let getDiagnosticsCallback = getDiagnostics cvode_mem c_method odeMaxEventsReached
+                let getDiagnosticsCallback = getDiagnostics cvode_mem c_method c_n_event_specs odeMaxEventsReached
                 -- /* Set the error handler */
                 setErrorHandler sunctx c_report_error
 
@@ -462,11 +462,11 @@ solveC CConsts {..} CVars {..} log_env =
       -- /* The number of actual roots we found */
       VSM.write c_n_events 0 (fromIntegral finalState.event_ind)
 
-      diagnostics <- getDiagnostics cvode_mem c_method odeMaxEventsReached
+      diagnostics <- getDiagnostics cvode_mem c_method c_n_event_specs odeMaxEventsReached
       pure (ARK_SUCCESS, diagnostics)
 
-getDiagnostics :: ARKodeMem -> CInt -> IORef Bool -> IO SundialsDiagnostics
-getDiagnostics cvode_mem c_method odeMaxEventsReached = do
+getDiagnostics :: ARKodeMem -> CInt -> CInt -> IORef Bool -> IO SundialsDiagnostics
+getDiagnostics cvode_mem c_method c_n_event_specs odeMaxEventsReached = do
       -- /* Get some final statistics on how the solve progressed */
       nst <- cvGet cARKodeGetNumSteps cvode_mem
 
@@ -501,7 +501,10 @@ getDiagnostics cvode_mem c_method odeMaxEventsReached = do
 
       maxEventReached <- readIORef odeMaxEventsReached
 
-      gevals <- cvGet cARKodeGetNumGEvals cvode_mem
+      gevals <- if (c_n_event_specs /= 0) then
+        cvGet cARKodeGetNumGEvals cvode_mem
+        else
+        pure 0
 
       let diagnostics = SundialsDiagnostics
              (fromIntegral $ nst)

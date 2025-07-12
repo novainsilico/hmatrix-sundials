@@ -6,24 +6,25 @@
             3
         ],
         "diagnostics": {
-            "dlsGetNumJacEvals": 0,
-            "dlsGetNumRhsEvals": 0,
+            "dlsGetNumJacEvals": 20,
+            "dlsGetNumRhsEvals": 20,
             "odeGetNumErrTestFails": 0,
             "odeGetNumLinSolvSetups": 0,
             "odeGetNumNonlinSolvConvFails": 0,
-            "odeGetNumNonlinSolvIters": 3,
+            "odeGetNumNonlinSolvIters": 0,
             "odeGetNumRhsEvals_fe": 0,
             "odeGetNumRhsEvals_fi": 0,
             "odeGetNumStepAttempts": 0,
             "odeGetNumSteps": 0,
-            "odeMaxEventsReached": false
+            "odeMaxEventsReached": false,
+            "odeNumRootEvals": 0
         },
         "solutionMatrix": [
             [
                 0
             ],
             [
-                1
+                0.9999999999999998
             ],
             [
                 1.9999999999999996
