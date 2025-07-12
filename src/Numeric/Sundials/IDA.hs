@@ -460,6 +460,8 @@ getDiagnostics cvode_mem odeMaxEventsReached = do
 
       nfeLS <- cvGet cIDAGetNumLinResEvals cvode_mem
 
+      gevals <- cvGet cIDAGetNumGEvals cvode_mem
+
       maxEventReached <- readIORef odeMaxEventsReached
 
       let diagnostics = SundialsDiagnostics
@@ -474,6 +476,7 @@ getDiagnostics cvode_mem odeMaxEventsReached = do
              (fromIntegral $ nje)
              (fromIntegral $ nfeLS)
              maxEventReached
+             (fromIntegral gevals)
       pure diagnostics
 
 --  |]
@@ -597,6 +600,8 @@ foreign import ccall "IDAGetNumResEvals" cIDAGetNumResEvals :: IDAMem -> Ptr CLo
 
 foreign import ccall "IDAGetNumLinResEvals" cIDAGetNumLinResEvals :: IDAMem -> Ptr CLong -> IO CInt
 
+foreign import ccall "IDAGetNumGEvals" cIDAGetNumGEvals :: IDAMem -> Ptr CLong -> IO CInt
+
 cvGet :: (HasCallStack) => (Storable b) => (IDAMem -> Ptr b -> IO CInt) -> IDAMem -> IO b
 cvGet getter cvode_mem = do
   alloca $ \ptr -> do
@@ -614,3 +619,4 @@ foreign import ccall "IDACalcIC" cIDACalcIC :: IDAMem -> CInt -> CDouble -> IO C
 foreign import ccall "IDAGetConsistentIC" cIDAGetConsistentIC :: IDAMem -> N_Vector -> N_Vector -> IO CInt
 
 foreign import ccall "IDASetId" cIDASetId :: IDAMem -> N_Vector -> IO CInt
+

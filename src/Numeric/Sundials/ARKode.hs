@@ -501,6 +501,8 @@ getDiagnostics cvode_mem c_method odeMaxEventsReached = do
 
       maxEventReached <- readIORef odeMaxEventsReached
 
+      gevals <- cvGet cARKodeGetNumGEvals cvode_mem
+
       let diagnostics = SundialsDiagnostics
              (fromIntegral $ nst)
              (fromIntegral $ nst_a)
@@ -513,6 +515,9 @@ getDiagnostics cvode_mem c_method odeMaxEventsReached = do
              (fromIntegral $ nje)
              (fromIntegral $ nfeLS)
              maxEventReached
+             (fromIntegral gevals)
+
+
       pure diagnostics
 
 --  |]
@@ -644,6 +649,9 @@ foreign import ccall "ARKStepGetNumRhsEvals" cARKStepGetNumRhsEvals :: ARKodeMem
 foreign import ccall "ARKodeGetNumLinRhsEvals" cARKodeGetNumLinRhsEvals :: ARKodeMem -> Ptr CLong -> IO CInt
 
 foreign import ccall "ARKodeGetNumStepAttempts" cARKodeGetNumStepAttempts :: ARKodeMem -> Ptr CLong -> IO CInt
+
+foreign import ccall "ARKodeGetNumGEvals" cARKodeGetNumGEvals :: ARKodeMem -> Ptr CLong -> IO CInt
+
 
 cvGet :: (HasCallStack) => (Storable b) => (ARKodeMem -> Ptr b -> IO CInt) -> ARKodeMem -> IO b
 cvGet getter cvode_mem = do

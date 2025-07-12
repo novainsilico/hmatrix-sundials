@@ -528,6 +528,7 @@ data SundialsDiagnostics = SundialsDiagnostics {
   , dlsGetNumJacEvals            :: !Int
   , dlsGetNumRhsEvals            :: !Int
   , odeMaxEventsReached          :: !Bool
+  , odeNumRootEvals              :: !Int
   } deriving (Eq, Show, Generic, NFData)
 
 instance Semigroup SundialsDiagnostics where
@@ -542,7 +543,8 @@ instance Semigroup SundialsDiagnostics where
           numNonlinSolvConvFails_1
           numJacEvals_1
           numRhsEvals_1
-          reachedMaxEvents_1)
+          reachedMaxEvents_1
+          numRoots_1)
 
         (SundialsDiagnostics
           numSteps_2
@@ -555,7 +557,8 @@ instance Semigroup SundialsDiagnostics where
           numNonlinSolvConvFails_2
           numJacEvals_2
           numRhsEvals_2
-          reachedMaxEvents_2)
+          reachedMaxEvents_2
+          numRoots_2)
 
       = SundialsDiagnostics
           (numSteps_2 + numSteps_1)
@@ -569,10 +572,11 @@ instance Semigroup SundialsDiagnostics where
           (numJacEvals_2 + numJacEvals_1)
           (numRhsEvals_2 + numRhsEvals_1)
           (reachedMaxEvents_1 || reachedMaxEvents_2)
+          (numRoots_1 + numRoots_2)
 
 instance Monoid SundialsDiagnostics
   where
-    mempty = SundialsDiagnostics 0 0 0 0 0 0 0 0 0 0 False
+    mempty = SundialsDiagnostics 0 0 0 0 0 0 0 0 0 0 False 0
 
 data SundialsSolution =
   SundialsSolution
