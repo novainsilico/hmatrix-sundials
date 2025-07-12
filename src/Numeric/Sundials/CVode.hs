@@ -33,7 +33,7 @@ import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
 import Text.Printf (printf)
 import Data.Coerce (coerce)
-import Data.IORef (readIORef, newIORef, writeIORef)
+import Data.IORef (readIORef, newIORef, writeIORef, IORef)
 
 -- | Available methods for CVode
 data CVMethod
@@ -399,7 +399,11 @@ solveC CConsts {..} CVars {..} log_env =
     end cvode_mem odeMaxEventsReached finalState = do
       -- /* The number of actual roots we found */
       VSM.write c_n_events 0 (fromIntegral finalState.event_ind)
+      diagnostics <- getDiagnostics cvode_mem odeMaxEventsReached
+      pure (CV_SUCCESS, diagnostics)
 
+getDiagnostics :: CVodeMem -> IORef Bool -> IO SundialsDiagnostics
+getDiagnostics cvode_mem odeMaxEventsReached = do
       -- /* Get some final statistics on how the solve progressed */
       nst <- cvGet cCVodeGetNumSteps cvode_mem
 
@@ -437,8 +441,7 @@ solveC CConsts {..} CVars {..} log_env =
              (fromIntegral $ nje)
              (fromIntegral $ nfeLS)
              maxEventReached
-
-      pure (CV_SUCCESS, diagnostics)
+      pure diagnostics
 
 --  |]
 

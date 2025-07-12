@@ -33,7 +33,7 @@ import Numeric.Sundials.Foreign
 import Text.Printf (printf)
 import Data.Coerce (coerce)
 import Data.Bool (bool)
-import Data.IORef (newIORef, writeIORef, readIORef)
+import Data.IORef (newIORef, writeIORef, readIORef, IORef)
 
 -- | Available methods for IDA
 data IDAMethod = IDADefault
@@ -429,6 +429,12 @@ solveC CConsts {..} CVars {..} log_env =
       -- /* The number of actual roots we found */
       VSM.write c_n_events 0 (fromIntegral finalState.event_ind)
 
+      diagnostics <- getDiagnostics cvode_mem odeMaxEventsReached
+      pure (IDA_SUCCESS, diagnostics)
+
+
+getDiagnostics :: IDAMem -> IORef Bool -> IO SundialsDiagnostics
+getDiagnostics cvode_mem odeMaxEventsReached = do
       -- /* Get some final statistics on how the solve progressed */
       nst <- cvGet cIDAGetNumSteps cvode_mem
 
@@ -467,8 +473,7 @@ solveC CConsts {..} CVars {..} log_env =
              (fromIntegral $ nje)
              (fromIntegral $ nfeLS)
              maxEventReached
-
-      pure (IDA_SUCCESS, diagnostics)
+      pure diagnostics
 
 --  |]
 

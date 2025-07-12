@@ -34,7 +34,7 @@ import Numeric.Sundials.Foreign
 import Text.Printf (printf)
 import Data.Vector.Mutable (RealWorld)
 import Data.Coerce (coerce)
-import Data.IORef (readIORef, newIORef, writeIORef)
+import Data.IORef (readIORef, newIORef, writeIORef, IORef)
 
 -- | Available methods for ARKode
 data ARKMethod
@@ -461,6 +461,11 @@ solveC CConsts {..} CVars {..} log_env =
       -- /* The number of actual roots we found */
       VSM.write c_n_events 0 (fromIntegral finalState.event_ind)
 
+      diagnostics <- getDiagnostics cvode_mem c_method odeMaxEventsReached
+      pure (ARK_SUCCESS, diagnostics)
+
+getDiagnostics :: ARKodeMem -> CInt -> IORef Bool -> IO SundialsDiagnostics
+getDiagnostics cvode_mem c_method odeMaxEventsReached = do
       -- /* Get some final statistics on how the solve progressed */
       nst <- cvGet cARKodeGetNumSteps cvode_mem
 
@@ -507,8 +512,7 @@ solveC CConsts {..} CVars {..} log_env =
              (fromIntegral $ nje)
              (fromIntegral $ nfeLS)
              maxEventReached
-
-      pure (ARK_SUCCESS, diagnostics)
+      pure diagnostics
 
 --  |]
 
