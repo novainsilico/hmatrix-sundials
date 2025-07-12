@@ -517,17 +517,17 @@ eventConditionsPure conds = EventConditionsHaskell $ \t y ->
   pure $ V.convert $ V.map (\cond -> cond t y) conds
 
 data SundialsDiagnostics = SundialsDiagnostics {
-    odeGetNumSteps               :: Int
-  , odeGetNumStepAttempts        :: Int
-  , odeGetNumRhsEvals_fe         :: Int
-  , odeGetNumRhsEvals_fi         :: Int
-  , odeGetNumLinSolvSetups       :: Int
-  , odeGetNumErrTestFails        :: Int
-  , odeGetNumNonlinSolvIters     :: Int
-  , odeGetNumNonlinSolvConvFails :: Int
-  , dlsGetNumJacEvals            :: Int
-  , dlsGetNumRhsEvals            :: Int
-  , odeMaxEventsReached          :: Bool
+    odeGetNumSteps               :: !Int
+  , odeGetNumStepAttempts        :: !Int
+  , odeGetNumRhsEvals_fe         :: !Int
+  , odeGetNumRhsEvals_fi         :: !Int
+  , odeGetNumLinSolvSetups       :: !Int
+  , odeGetNumErrTestFails        :: !Int
+  , odeGetNumNonlinSolvIters     :: !Int
+  , odeGetNumNonlinSolvConvFails :: !Int
+  , dlsGetNumJacEvals            :: !Int
+  , dlsGetNumRhsEvals            :: !Int
+  , odeMaxEventsReached          :: !Bool
   } deriving (Eq, Show, Generic, NFData)
 
 instance Semigroup SundialsDiagnostics where
