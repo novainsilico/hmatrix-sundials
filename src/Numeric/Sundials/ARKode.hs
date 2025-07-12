@@ -160,6 +160,7 @@ solveC CConsts {..} CVars {..} log_env =
                     | not implicit = \c_rhs -> withARKStepCreate c_rhs nullFunPtr
                     | otherwise = \c_rhs -> withARKStepCreate nullFunPtr c_rhs
               withArkStep c_rhs t0 y sunctx 8396 $ \cvode_mem -> do
+                let getDiagnosticsCallback = getDiagnostics cvode_mem c_method odeMaxEventsReached
                 -- /* Set the error handler */
                 setErrorHandler sunctx c_report_error
 
@@ -232,7 +233,7 @@ solveC CConsts {..} CVars {..} log_env =
                               go (j + 1)
                     go 0
 
-                    c_ontimepoint (fromIntegral init_loop.output_ind)
+                    c_ontimepoint (fromIntegral init_loop.output_ind) getDiagnosticsCallback
 
                     if implicit
                       then do
@@ -318,7 +319,7 @@ solveC CConsts {..} CVars {..} log_env =
                           go 0
 
                           s <- get
-                          liftIO $ c_ontimepoint (fromIntegral s.output_ind)
+                          liftIO $ c_ontimepoint (fromIntegral s.output_ind) getDiagnosticsCallback
                           modify $ \s -> s {output_ind = s.output_ind + 1}
 
                           s <- get
@@ -405,7 +406,7 @@ solveC CConsts {..} CVars {..} log_env =
                                 go 0
 
                                 s <- get
-                                liftIO $ c_ontimepoint $ fromIntegral s.output_ind
+                                liftIO $ c_ontimepoint (fromIntegral s.output_ind) getDiagnosticsCallback
                                 modify $ \s -> s {event_ind = s.event_ind + 1, output_ind = s.output_ind + 1}
                                 s <- get
                                 VSM.write c_n_rows 0 (fromIntegral s.output_ind)

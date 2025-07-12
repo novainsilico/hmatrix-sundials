@@ -106,6 +106,7 @@ solveC CConsts {..} CVars {..} log_env =
               VS.imapM_ (\i v -> cNV_Ith_S yp i v) c_init_differentials
 
               withIDACreate sunctx 8396 $ \ida_mem -> do
+                let getDiagnosticsCallback = getDiagnostics ida_mem odeMaxEventsReached
                 cIDAInit ida_mem c_ida_res t0 y yp >>= check 1234
                 -- /* Set the error handler */
                 setErrorHandler sunctx c_report_error
@@ -195,7 +196,7 @@ solveC CConsts {..} CVars {..} log_env =
                               go (j + 1)
                     go 0
 
-                    c_ontimepoint (fromIntegral init_loop.output_ind)
+                    c_ontimepoint (fromIntegral init_loop.output_ind) getDiagnosticsCallback
 
                     let loop :: CDouble -> StateT LoopState IO ()
                         loop next_time_event = do
@@ -290,7 +291,7 @@ solveC CConsts {..} CVars {..} log_env =
                           go 0
 
                           s <- get
-                          liftIO $ c_ontimepoint (fromIntegral s.output_ind)
+                          liftIO $ c_ontimepoint (fromIntegral s.output_ind) getDiagnosticsCallback
                           modify $ \s -> s {output_ind = s.output_ind + 1}
 
                           s <- get
@@ -375,7 +376,7 @@ solveC CConsts {..} CVars {..} log_env =
                                 go 0
 
                                 s <- get
-                                liftIO $ c_ontimepoint $ fromIntegral s.output_ind
+                                liftIO $ c_ontimepoint (fromIntegral s.output_ind) getDiagnosticsCallback
                                 modify $ \s -> s {event_ind = s.event_ind + 1, output_ind = s.output_ind + 1}
                                 s <- get
                                 VSM.write c_n_rows 0 (fromIntegral s.output_ind)

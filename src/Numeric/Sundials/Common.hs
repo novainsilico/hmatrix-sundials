@@ -344,6 +344,8 @@ type EventHandler
 -- directly.
 type TimePointHandler
   =  CInt -- ^ timepoint index
+  -> IO SundialsDiagnostics
+  -- ^ Get the different diagnostics
   -> IO ()
 
 -- | Represents the inner function of the system. The solver can solve
