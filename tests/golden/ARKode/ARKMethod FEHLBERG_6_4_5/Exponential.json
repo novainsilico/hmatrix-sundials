@@ -34,11 +34,12 @@
             "odeGetNumLinSolvSetups": 0,
             "odeGetNumNonlinSolvConvFails": 0,
             "odeGetNumNonlinSolvIters": 0,
-            "odeGetNumRhsEvals_fe": 79,
+            "odeGetNumRhsEvals_fe": 72,
             "odeGetNumRhsEvals_fi": 0,
             "odeGetNumStepAttempts": 7,
             "odeGetNumSteps": 7,
-            "odeMaxEventsReached": false
+            "odeMaxEventsReached": false,
+            "odeNumRootEvals": 21
         },
         "solutionMatrix": [
             [
