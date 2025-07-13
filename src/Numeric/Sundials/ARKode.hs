@@ -129,7 +129,8 @@ solveC CConsts {..} CVars {..} log_env =
                         --    Why not just look for the last recorded time in c_output_mat? Because
                         --    an event may have eventRecord = False and not be present there.
                         -- \*/
-                        t_start = t0
+                        t_start = t0,
+                        nb_reinit = 0
                       }
                   )
 
@@ -160,7 +161,7 @@ solveC CConsts {..} CVars {..} log_env =
                     | not implicit = \c_rhs -> withARKStepCreate c_rhs nullFunPtr
                     | otherwise = \c_rhs -> withARKStepCreate nullFunPtr c_rhs
               withArkStep c_rhs t0 y sunctx 8396 $ \cvode_mem -> do
-                let getDiagnosticsCallback = getDiagnostics cvode_mem c_method c_n_event_specs odeMaxEventsReached
+                let getDiagnosticsCallback state = getDiagnostics cvode_mem state c_method c_n_event_specs odeMaxEventsReached
                 -- /* Set the error handler */
                 setErrorHandler sunctx c_report_error
 
@@ -233,7 +234,7 @@ solveC CConsts {..} CVars {..} log_env =
                               go (j + 1)
                     go 0
 
-                    c_ontimepoint (fromIntegral init_loop.output_ind) getDiagnosticsCallback
+                    c_ontimepoint (fromIntegral init_loop.output_ind) (getDiagnosticsCallback init_loop)
 
                     if implicit
                       then do
@@ -319,7 +320,7 @@ solveC CConsts {..} CVars {..} log_env =
                           go 0
 
                           s <- get
-                          liftIO $ c_ontimepoint (fromIntegral s.output_ind) getDiagnosticsCallback
+                          liftIO $ c_ontimepoint (fromIntegral s.output_ind) (getDiagnosticsCallback s)
                           modify $ \s -> s {output_ind = s.output_ind + 1}
 
                           s <- get
@@ -406,7 +407,7 @@ solveC CConsts {..} CVars {..} log_env =
                                 go 0
 
                                 s <- get
-                                liftIO $ c_ontimepoint (fromIntegral s.output_ind) getDiagnosticsCallback
+                                liftIO $ c_ontimepoint (fromIntegral s.output_ind) (getDiagnosticsCallback s)
                                 modify $ \s -> s {event_ind = s.event_ind + 1, output_ind = s.output_ind + 1}
                                 s <- get
                                 VSM.write c_n_rows 0 (fromIntegral s.output_ind)
@@ -436,6 +437,7 @@ solveC CConsts {..} CVars {..} log_env =
                                   liftIO $ cARKStepReInit cvode_mem c_rhs nullFunPtr t y >>= check 1576
                                 else do
                                   liftIO $ cARKStepReInit cvode_mem nullFunPtr c_rhs t y >>= check 1576
+                              modify $ \s -> s { nb_reinit = nb_reinit s + 1 }
 
                           when (t == ti) $ do
                             modify $ \s -> s {input_ind = s.input_ind + 1}
@@ -462,11 +464,11 @@ solveC CConsts {..} CVars {..} log_env =
       -- /* The number of actual roots we found */
       VSM.write c_n_events 0 (fromIntegral finalState.event_ind)
 
-      diagnostics <- getDiagnostics cvode_mem c_method c_n_event_specs odeMaxEventsReached
+      diagnostics <- getDiagnostics cvode_mem finalState c_method c_n_event_specs odeMaxEventsReached
       pure (ARK_SUCCESS, diagnostics)
 
-getDiagnostics :: ARKodeMem -> CInt -> CInt -> IORef Bool -> IO SundialsDiagnostics
-getDiagnostics cvode_mem c_method c_n_event_specs odeMaxEventsReached = do
+getDiagnostics :: ARKodeMem -> LoopState -> CInt -> CInt -> IORef Bool -> IO SundialsDiagnostics
+getDiagnostics cvode_mem loopState c_method c_n_event_specs odeMaxEventsReached = do
       -- /* Get some final statistics on how the solve progressed */
       nst <- cvGet cARKodeGetNumSteps cvode_mem
 
@@ -520,6 +522,7 @@ getDiagnostics cvode_mem c_method c_n_event_specs odeMaxEventsReached = do
              (fromIntegral $ nfeLS)
              maxEventReached
              (fromIntegral gevals)
+             (nb_reinit loopState)
 
 
       pure diagnostics

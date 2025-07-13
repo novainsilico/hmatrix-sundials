@@ -78,7 +78,8 @@ solveC CConsts {..} CVars {..} log_env =
                         --    Why not just look for the last recorded time in c_output_mat? Because
                         --    an event may have eventRecord = False and not be present there.
                         -- \*/
-                        t_start = t0
+                        t_start = t0,
+                        nb_reinit = 0
                       }
                   )
 
@@ -106,7 +107,7 @@ solveC CConsts {..} CVars {..} log_env =
               VS.imapM_ (\i v -> cNV_Ith_S yp i v) c_init_differentials
 
               withIDACreate sunctx 8396 $ \ida_mem -> do
-                let getDiagnosticsCallback = getDiagnostics ida_mem odeMaxEventsReached
+                let getDiagnosticsCallback state = getDiagnostics ida_mem state odeMaxEventsReached
                 cIDAInit ida_mem c_ida_res t0 y yp >>= check 1234
                 -- /* Set the error handler */
                 setErrorHandler sunctx c_report_error
@@ -196,7 +197,7 @@ solveC CConsts {..} CVars {..} log_env =
                               go (j + 1)
                     go 0
 
-                    c_ontimepoint (fromIntegral init_loop.output_ind) getDiagnosticsCallback
+                    c_ontimepoint (fromIntegral init_loop.output_ind) (getDiagnosticsCallback init_loop)
 
                     let loop :: CDouble -> StateT LoopState IO ()
                         loop next_time_event = do
@@ -291,7 +292,7 @@ solveC CConsts {..} CVars {..} log_env =
                           go 0
 
                           s <- get
-                          liftIO $ c_ontimepoint (fromIntegral s.output_ind) getDiagnosticsCallback
+                          liftIO $ c_ontimepoint (fromIntegral s.output_ind) (getDiagnosticsCallback s)
                           modify $ \s -> s {output_ind = s.output_ind + 1}
 
                           s <- get
@@ -376,7 +377,7 @@ solveC CConsts {..} CVars {..} log_env =
                                 go 0
 
                                 s <- get
-                                liftIO $ c_ontimepoint (fromIntegral s.output_ind) getDiagnosticsCallback
+                                liftIO $ c_ontimepoint (fromIntegral s.output_ind) (getDiagnosticsCallback s)
                                 modify $ \s -> s {event_ind = s.event_ind + 1, output_ind = s.output_ind + 1}
                                 s <- get
                                 VSM.write c_n_rows 0 (fromIntegral s.output_ind)
@@ -402,6 +403,7 @@ solveC CConsts {..} CVars {..} log_env =
                             when (n_events_triggered > 0 || time_based_event) $ do
                               debug ("Re-initializing the system")
                               liftIO $ cIDAReInit ida_mem t y yp >>= check 1576
+                              modify $ \s -> s { nb_reinit = nb_reinit s + 1 }
 
                           when (t == ti) $ do
                             modify $ \s -> s {input_ind = s.input_ind + 1}
@@ -430,12 +432,12 @@ solveC CConsts {..} CVars {..} log_env =
       -- /* The number of actual roots we found */
       VSM.write c_n_events 0 (fromIntegral finalState.event_ind)
 
-      diagnostics <- getDiagnostics cvode_mem odeMaxEventsReached
+      diagnostics <- getDiagnostics cvode_mem finalState odeMaxEventsReached
       pure (IDA_SUCCESS, diagnostics)
 
 
-getDiagnostics :: IDAMem -> IORef Bool -> IO SundialsDiagnostics
-getDiagnostics cvode_mem odeMaxEventsReached = do
+getDiagnostics :: IDAMem -> LoopState -> IORef Bool -> IO SundialsDiagnostics
+getDiagnostics cvode_mem loopState odeMaxEventsReached = do
       -- /* Get some final statistics on how the solve progressed */
       nst <- cvGet cIDAGetNumSteps cvode_mem
 
@@ -477,6 +479,7 @@ getDiagnostics cvode_mem odeMaxEventsReached = do
              (fromIntegral $ nfeLS)
              maxEventReached
              (fromIntegral gevals)
+             (nb_reinit loopState)
       pure diagnostics
 
 --  |]

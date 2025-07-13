@@ -25,6 +25,7 @@
             "odeGetNumStepAttempts": 87,
             "odeGetNumSteps": 58,
             "odeMaxEventsReached": false,
+            "odeNumReinit": 0,
             "odeNumRootEvals": 0
         },
         "solutionMatrix": [

@@ -233,7 +233,9 @@ data LoopState = LoopState
     input_ind :: {-# UNPACK #-} !Int,
     -- event_ind tracks the current event number
     event_ind :: {-# UNPACK #-} !Int,
-    t_start :: {-# UNPACK #-} !CDouble
+    t_start :: {-# UNPACK #-} !CDouble,
+    -- Count the number of reinit of the solver
+    nb_reinit :: {-# UNPACK #-} !Int
   }
   deriving (Show)
 

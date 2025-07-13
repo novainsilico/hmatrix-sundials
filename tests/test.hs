@@ -184,9 +184,7 @@ odeGoldenTest _do_canonical' opts name action =
           (encodePretty' defConfig {confCompare = compare} val)
       return $ goldenTest
         type_ -- test name
-        -- In case decoding is wrong, we replace by a dummy diagnostics and
-        -- continue. Golden test update should take care of updating the file
-        (fromMaybe (Left $ ErrorDiagnostics 0 mempty mempty mempty) <$> decodeFileStrict golden_path) -- get the golden value
+        (fromJust <$> decodeFileStrict golden_path) -- get the golden value
         action -- get the tested value
         cmp
         upd
