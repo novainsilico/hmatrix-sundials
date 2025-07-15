@@ -23,11 +23,7 @@ import Foreign.ForeignPtr
 -- | A collection of variables that we allocate on the Haskell side and
 -- pass into the C code to be filled.
 data CVars vec = CVars
-  { c_diagnostics :: vec SunIndexType
-    -- ^ Mutable vector to which we write diagnostic data while
-    -- solving. Its size corresponds to the number of fields in
-    -- 'SundialsDiagnostics'.
-  , c_root_info :: vec CInt
+  { c_root_info :: vec CInt
     -- ^ Just a temporary vector (of the size equal to the number of event
     -- specs) that we use to get root info. Isn't used for output.
   , c_event_index :: vec CInt
@@ -60,7 +56,6 @@ data CVars vec = CVars
 allocateCVars :: OdeProblem -> IO (CVars (VS.MVector VSM.RealWorld))
 allocateCVars OdeProblem{..} = do
   let dim = VS.length odeInitCond
-  c_diagnostics <- VSM.new 11
   c_root_info <- VSM.new $ V.length odeEventDirections
   c_event_index <- VSM.new odeMaxEvents
   c_event_time <- VSM.new odeMaxEvents
@@ -78,7 +73,6 @@ allocateCVars OdeProblem{..} = do
 -- NB: the mutable CVars must not be used after this
 freezeCVars :: CVars (VS.MVector VSM.RealWorld) -> IO (CVars VS.Vector)
 freezeCVars CVars{..} = do
-  c_diagnostics <- VS.unsafeFreeze c_diagnostics
   c_root_info <- VS.unsafeFreeze c_root_info
   c_event_index <- VS.unsafeFreeze c_event_index
   c_event_time <- VS.unsafeFreeze c_event_time
@@ -204,10 +198,10 @@ foreign import ccall "wrapper"
 
 assembleSolverResult
   :: OdeProblem
-  -> CInt
+  -> (CInt, SundialsDiagnostics)
   -> CVars VS.Vector
   -> IO (Either ErrorDiagnostics SundialsSolution)
-assembleSolverResult OdeProblem{..} ret CVars{..} = do
+assembleSolverResult OdeProblem{..} (ret, diagnostics) CVars{..} = do
   let
     dim = VS.length odeInitCond
     n_rows = fromIntegral . VS.head $ c_n_rows
@@ -216,18 +210,6 @@ assembleSolverResult OdeProblem{..} ret CVars{..} = do
       if c_local_error_set VS.! 0 == 0
         then (mempty, mempty)
         else (VS.unsafeCoerceVector c_local_error, VS.unsafeCoerceVector c_var_weight)
-    diagnostics = SundialsDiagnostics
-      (fromIntegral $ c_diagnostics VS.!0)
-      (fromIntegral $ c_diagnostics VS.!1)
-      (fromIntegral $ c_diagnostics VS.!2)
-      (fromIntegral $ c_diagnostics VS.!3)
-      (fromIntegral $ c_diagnostics VS.!4)
-      (fromIntegral $ c_diagnostics VS.!5)
-      (fromIntegral $ c_diagnostics VS.!6)
-      (fromIntegral $ c_diagnostics VS.!7)
-      (fromIntegral $ c_diagnostics VS.!8)
-      (fromIntegral $ c_diagnostics VS.!9)
-      (toEnum . fromIntegral $ c_diagnostics VS.! 10)
   return $
     if ret == T.cV_SUCCESS
       then
@@ -357,9 +339,15 @@ type EventHandler
   -> IO EventHandlerResult
 
 -- | This callback will be called when a timepoint is saved
--- Maybe in the future we'll use this as a stream provider, but for now it is only used for debuging purpose.
+-- Maybe in the future we'll use this as a stream provider, but for now it is
+-- only used for debuging purpose.
+-- Note that this is NOT required anymore to build a stream abstraction,
+-- because the main loop is in haskell, so it can just stream the timepoint
+-- directly.
 type TimePointHandler
   =  CInt -- ^ timepoint index
+  -> IO SundialsDiagnostics
+  -- ^ Get the different diagnostics
   -> IO ()
 
 -- | Represents the inner function of the system. The solver can solve
@@ -421,6 +409,7 @@ data OdeProblem = OdeProblem
   , odeTolerances :: Tolerances
     -- ^ How much error is tolerated in each variable.
   , odeOnTimePoint :: Maybe TimePointHandler
+  -- ^ This is called everytime the solver stores a timepoint
   }
 
 data Tolerances = Tolerances
@@ -532,17 +521,19 @@ eventConditionsPure conds = EventConditionsHaskell $ \t y ->
   pure $ V.convert $ V.map (\cond -> cond t y) conds
 
 data SundialsDiagnostics = SundialsDiagnostics {
-    odeGetNumSteps               :: Int
-  , odeGetNumStepAttempts        :: Int
-  , odeGetNumRhsEvals_fe         :: Int
-  , odeGetNumRhsEvals_fi         :: Int
-  , odeGetNumLinSolvSetups       :: Int
-  , odeGetNumErrTestFails        :: Int
-  , odeGetNumNonlinSolvIters     :: Int
-  , odeGetNumNonlinSolvConvFails :: Int
-  , dlsGetNumJacEvals            :: Int
-  , dlsGetNumRhsEvals            :: Int
-  , odeMaxEventsReached          :: Bool
+    odeGetNumSteps               :: !Int
+  , odeGetNumStepAttempts        :: !Int
+  , odeGetNumRhsEvals_fe         :: !Int
+  , odeGetNumRhsEvals_fi         :: !Int
+  , odeGetNumLinSolvSetups       :: !Int
+  , odeGetNumErrTestFails        :: !Int
+  , odeGetNumNonlinSolvIters     :: !Int
+  , odeGetNumNonlinSolvConvFails :: !Int
+  , dlsGetNumJacEvals            :: !Int
+  , dlsGetNumRhsEvals            :: !Int
+  , odeMaxEventsReached          :: !Bool
+  , odeNumRootEvals              :: !Int
+  , odeNumReinit                 :: !Int
   } deriving (Eq, Show, Generic, NFData)
 
 instance Semigroup SundialsDiagnostics where
@@ -557,7 +548,9 @@ instance Semigroup SundialsDiagnostics where
           numNonlinSolvConvFails_1
           numJacEvals_1
           numRhsEvals_1
-          reachedMaxEvents_1)
+          reachedMaxEvents_1
+          numRoots_1
+          numReinit_1)
 
         (SundialsDiagnostics
           numSteps_2
@@ -570,7 +563,9 @@ instance Semigroup SundialsDiagnostics where
           numNonlinSolvConvFails_2
           numJacEvals_2
           numRhsEvals_2
-          reachedMaxEvents_2)
+          reachedMaxEvents_2
+          numRoots_2
+          numReinit_2)
 
       = SundialsDiagnostics
           (numSteps_2 + numSteps_1)
@@ -584,10 +579,12 @@ instance Semigroup SundialsDiagnostics where
           (numJacEvals_2 + numJacEvals_1)
           (numRhsEvals_2 + numRhsEvals_1)
           (reachedMaxEvents_1 || reachedMaxEvents_2)
+          (numRoots_1 + numRoots_2)
+          (numReinit_1 + numReinit_2)
 
 instance Monoid SundialsDiagnostics
   where
-    mempty = SundialsDiagnostics 0 0 0 0 0 0 0 0 0 0 False
+    mempty = SundialsDiagnostics 0 0 0 0 0 0 0 0 0 0 False 0 0
 
 data SundialsSolution =
   SundialsSolution

@@ -4,17 +4,19 @@
             0
         ],
         "diagnostics": {
-            "dlsGetNumJacEvals": 0,
-            "dlsGetNumRhsEvals": 0,
+            "dlsGetNumJacEvals": 1,
+            "dlsGetNumRhsEvals": 2,
             "odeGetNumErrTestFails": 0,
             "odeGetNumLinSolvSetups": 4,
             "odeGetNumNonlinSolvConvFails": 0,
             "odeGetNumNonlinSolvIters": 8,
             "odeGetNumRhsEvals_fe": 0,
-            "odeGetNumRhsEvals_fi": 23,
+            "odeGetNumRhsEvals_fi": 19,
             "odeGetNumStepAttempts": 4,
             "odeGetNumSteps": 4,
-            "odeMaxEventsReached": false
+            "odeMaxEventsReached": false,
+            "odeNumReinit": 0,
+            "odeNumRootEvals": 6
         },
         "solutionMatrix": [
             [

@@ -370,7 +370,7 @@
             6.283185307179586
         ],
         "diagnostics": {
-            "dlsGetNumJacEvals": 0,
+            "dlsGetNumJacEvals": 1,
             "dlsGetNumRhsEvals": 0,
             "odeGetNumErrTestFails": 4,
             "odeGetNumLinSolvSetups": 13,
@@ -380,7 +380,9 @@
             "odeGetNumRhsEvals_fi": 0,
             "odeGetNumStepAttempts": 0,
             "odeGetNumSteps": 34,
-            "odeMaxEventsReached": false
+            "odeMaxEventsReached": false,
+            "odeNumReinit": 3,
+            "odeNumRootEvals": 74
         },
         "solutionMatrix": [
             [

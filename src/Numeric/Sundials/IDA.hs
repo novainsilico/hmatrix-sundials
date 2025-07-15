@@ -33,6 +33,7 @@ import Numeric.Sundials.Foreign
 import Text.Printf (printf)
 import Data.Coerce (coerce)
 import Data.Bool (bool)
+import Data.IORef (newIORef, writeIORef, readIORef, IORef)
 
 -- | Available methods for IDA
 data IDAMethod = IDADefault
@@ -46,7 +47,7 @@ instance IsMethod IDAMethod where
 foreign import ccall "wrapper"
   mkReport :: ReportErrorFnNew -> IO (FunPtr ReportErrorFnNew)
 
-solveC :: CConsts -> CVars (VS.MVector VSM.RealWorld) -> LogEnv -> IO CInt
+solveC :: CConsts -> CVars (VS.MVector VSM.RealWorld) -> LogEnv -> IO (CInt, SundialsDiagnostics)
 solveC CConsts {..} CVars {..} log_env =
   let report_error_new_api = wrapErrorNewApi (reportErrorWithKatip log_env)
       debug :: String -> StateT LoopState IO ()
@@ -77,7 +78,8 @@ solveC CConsts {..} CVars {..} log_env =
                         --    Why not just look for the last recorded time in c_output_mat? Because
                         --    an event may have eventRecord = False and not be present there.
                         -- \*/
-                        t_start = t0
+                        t_start = t0,
+                        nb_reinit = 0
                       }
                   )
 
@@ -96,7 +98,7 @@ solveC CConsts {..} CVars {..} log_env =
             -- /* Initialize data structures */
 
             -- /* Initialize odeMaxEventsReached to False */
-            VSM.write c_diagnostics 10 0
+            odeMaxEventsReached <- newIORef False
 
             -- /* Create serial vector for solution */
             withNVector_Serial c_dim sunctx 6896 $ \y -> withNVector_Serial c_dim sunctx 6896 $ \yp -> withNVector_Serial c_dim sunctx 6896 $ \ids -> do
@@ -105,6 +107,7 @@ solveC CConsts {..} CVars {..} log_env =
               VS.imapM_ (\i v -> cNV_Ith_S yp i v) c_init_differentials
 
               withIDACreate sunctx 8396 $ \ida_mem -> do
+                let getDiagnosticsCallback state = getDiagnostics ida_mem state odeMaxEventsReached
                 cIDAInit ida_mem c_ida_res t0 y yp >>= check 1234
                 -- /* Set the error handler */
                 setErrorHandler sunctx c_report_error
@@ -194,7 +197,7 @@ solveC CConsts {..} CVars {..} log_env =
                               go (j + 1)
                     go 0
 
-                    c_ontimepoint (fromIntegral init_loop.output_ind)
+                    c_ontimepoint (fromIntegral init_loop.output_ind) (getDiagnosticsCallback init_loop)
 
                     let loop :: CDouble -> StateT LoopState IO ()
                         loop next_time_event = do
@@ -289,7 +292,7 @@ solveC CConsts {..} CVars {..} log_env =
                           go 0
 
                           s <- get
-                          liftIO $ c_ontimepoint (fromIntegral s.output_ind)
+                          liftIO $ c_ontimepoint (fromIntegral s.output_ind) (getDiagnosticsCallback s)
                           modify $ \s -> s {output_ind = s.output_ind + 1}
 
                           s <- get
@@ -374,7 +377,7 @@ solveC CConsts {..} CVars {..} log_env =
                                 go 0
 
                                 s <- get
-                                liftIO $ c_ontimepoint $ fromIntegral s.output_ind
+                                liftIO $ c_ontimepoint (fromIntegral s.output_ind) (getDiagnosticsCallback s)
                                 modify $ \s -> s {event_ind = s.event_ind + 1, output_ind = s.output_ind + 1}
                                 s <- get
                                 VSM.write c_n_rows 0 (fromIntegral s.output_ind)
@@ -389,7 +392,7 @@ solveC CConsts {..} CVars {..} log_env =
                               if (fromIntegral s.event_ind >= c_max_events)
                                 then do
                                   debug ("Reached max_events; returning")
-                                  VSM.write c_diagnostics 10 1
+                                  liftIO $ writeIORef odeMaxEventsReached True
                                   pure 1
                                 else pure stop_solver
                             when (stop_solver /= 0) $ do
@@ -400,6 +403,7 @@ solveC CConsts {..} CVars {..} log_env =
                             when (n_events_triggered > 0 || time_based_event) $ do
                               debug ("Re-initializing the system")
                               liftIO $ cIDAReInit ida_mem t y yp >>= check 1576
+                              modify $ \s -> s { nb_reinit = nb_reinit s + 1 }
 
                           when (t == ti) $ do
                             modify $ \s -> s {input_ind = s.input_ind + 1}
@@ -415,54 +419,68 @@ solveC CConsts {..} CVars {..} log_env =
                     resM <- try $ execStateT (loop first_time_event) init_loop
                     case resM of
                       Left (ReturnCode c)
-                        | c == fromIntegral IDA_SUCCESS -> pure IDA_SUCCESS
-                        | otherwise -> pure $ (fromIntegral c)
+                        | c == fromIntegral IDA_SUCCESS -> pure (IDA_SUCCESS, mempty)
+                        | otherwise -> pure $ (fromIntegral c, mempty)
                       Left (ReturnCodeWithMessage _message c)
-                        | c == fromIntegral IDA_SUCCESS -> pure IDA_SUCCESS
-                        | otherwise -> pure $ (fromIntegral c)
-                      Right finalState -> end ida_mem finalState
-                      Left (Break finalState) -> end ida_mem finalState
-                      Left (Finish finalState) -> end ida_mem finalState
+                        | c == fromIntegral IDA_SUCCESS -> pure (IDA_SUCCESS, mempty)
+                        | otherwise -> pure $ (fromIntegral c, mempty)
+                      Right finalState -> end ida_mem odeMaxEventsReached finalState
+                      Left (Break finalState) -> end ida_mem odeMaxEventsReached finalState
+                      Left (Finish finalState) -> end ida_mem odeMaxEventsReached finalState
   where
-    end cvode_mem finalState = do
+    end cvode_mem odeMaxEventsReached finalState = do
       -- /* The number of actual roots we found */
       VSM.write c_n_events 0 (fromIntegral finalState.event_ind)
 
+      diagnostics <- getDiagnostics cvode_mem finalState odeMaxEventsReached
+      pure (IDA_SUCCESS, diagnostics)
+
+
+getDiagnostics :: IDAMem -> LoopState -> IORef Bool -> IO SundialsDiagnostics
+getDiagnostics cvode_mem loopState odeMaxEventsReached = do
       -- /* Get some final statistics on how the solve progressed */
       nst <- cvGet cIDAGetNumSteps cvode_mem
-      VSM.write c_diagnostics 0 (fromIntegral nst)
 
       -- This diagnostic is not available with IDA
       let nst_a = 0 :: Int
-      VSM.write c_diagnostics 1 (fromIntegral nst_a)
 
    
       nfe <- cvGet cIDAGetNumResEvals cvode_mem
-      VSM.write c_diagnostics 2 (fromIntegral nfe)
 
       -- This diagnostic is not available with IDA
       let nfi = 0 :: Int
-      VSM.write c_diagnostics 3 (fromIntegral nfi)
 
       nsetups <- cvGet cIDAGetNumLinSolvSetups cvode_mem
-      VSM.write c_diagnostics 4 (fromIntegral nsetups)
 
       netf <- cvGet cIDAGetNumErrTestFails cvode_mem
-      VSM.write c_diagnostics 5 (fromIntegral netf)
 
       nni <- cvGet cIDAGetNumNonlinSolvIters cvode_mem
-      VSM.write c_diagnostics 6 (fromIntegral nni)
 
       ncfn <- cvGet cIDAGetNumNonlinSolvConvFails cvode_mem
-      VSM.write c_diagnostics 7 (fromIntegral ncfn)
 
       nje <- cvGet cIDAGetNumJacEvals cvode_mem
-      VSM.write c_diagnostics 8 (fromIntegral nje)
 
       nfeLS <- cvGet cIDAGetNumLinResEvals cvode_mem
-      VSM.write c_diagnostics 9 (fromIntegral nfeLS)
 
-      pure IDA_SUCCESS
+      gevals <- cvGet cIDAGetNumGEvals cvode_mem
+
+      maxEventReached <- readIORef odeMaxEventsReached
+
+      let diagnostics = SundialsDiagnostics
+             (fromIntegral $ nst)
+             (fromIntegral $ nst_a)
+             (fromIntegral $ nfe)
+             (fromIntegral $ nfi)
+             (fromIntegral $ nsetups)
+             (fromIntegral $ netf)
+             (fromIntegral $ nni)
+             (fromIntegral $ ncfn)
+             (fromIntegral $ nje)
+             (fromIntegral $ nfeLS)
+             maxEventReached
+             (fromIntegral gevals)
+             (nb_reinit loopState)
+      pure diagnostics
 
 --  |]
 
@@ -585,6 +603,8 @@ foreign import ccall "IDAGetNumResEvals" cIDAGetNumResEvals :: IDAMem -> Ptr CLo
 
 foreign import ccall "IDAGetNumLinResEvals" cIDAGetNumLinResEvals :: IDAMem -> Ptr CLong -> IO CInt
 
+foreign import ccall "IDAGetNumGEvals" cIDAGetNumGEvals :: IDAMem -> Ptr CLong -> IO CInt
+
 cvGet :: (HasCallStack) => (Storable b) => (IDAMem -> Ptr b -> IO CInt) -> IDAMem -> IO b
 cvGet getter cvode_mem = do
   alloca $ \ptr -> do
@@ -602,3 +622,4 @@ foreign import ccall "IDACalcIC" cIDACalcIC :: IDAMem -> CInt -> CDouble -> IO C
 foreign import ccall "IDAGetConsistentIC" cIDAGetConsistentIC :: IDAMem -> N_Vector -> N_Vector -> IO CInt
 
 foreign import ccall "IDASetId" cIDASetId :: IDAMem -> N_Vector -> IO CInt
+

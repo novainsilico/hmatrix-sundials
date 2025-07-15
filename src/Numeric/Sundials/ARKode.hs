@@ -34,6 +34,7 @@ import Numeric.Sundials.Foreign
 import Text.Printf (printf)
 import Data.Vector.Mutable (RealWorld)
 import Data.Coerce (coerce)
+import Data.IORef (readIORef, newIORef, writeIORef, IORef)
 
 -- | Available methods for ARKode
 data ARKMethod
@@ -97,7 +98,7 @@ instance IsMethod ARKMethod where
 foreign import ccall "wrapper"
   mkReport :: ReportErrorFnNew -> IO (FunPtr ReportErrorFnNew)
 
-solveC :: CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO CInt
+solveC :: CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO (CInt, SundialsDiagnostics)
 solveC CConsts {..} CVars {..} log_env =
   let report_error_new_api = wrapErrorNewApi (reportErrorWithKatip log_env)
       debug :: String -> StateT LoopState IO ()
@@ -128,7 +129,8 @@ solveC CConsts {..} CVars {..} log_env =
                         --    Why not just look for the last recorded time in c_output_mat? Because
                         --    an event may have eventRecord = False and not be present there.
                         -- \*/
-                        t_start = t0
+                        t_start = t0,
+                        nb_reinit = 0
                       }
                   )
 
@@ -147,7 +149,7 @@ solveC CConsts {..} CVars {..} log_env =
             -- /* Initialize data structures */
 
             -- /* Initialize odeMaxEventsReached to False */
-            VSM.write c_diagnostics 10 0
+            odeMaxEventsReached <- newIORef False
             let implicit = c_method >= ARKODE_MIN_DIRK_NUM
 
             -- /* Create serial vector for solution */
@@ -159,6 +161,7 @@ solveC CConsts {..} CVars {..} log_env =
                     | not implicit = \c_rhs -> withARKStepCreate c_rhs nullFunPtr
                     | otherwise = \c_rhs -> withARKStepCreate nullFunPtr c_rhs
               withArkStep c_rhs t0 y sunctx 8396 $ \cvode_mem -> do
+                let getDiagnosticsCallback state = getDiagnostics cvode_mem state c_method c_n_event_specs odeMaxEventsReached
                 -- /* Set the error handler */
                 setErrorHandler sunctx c_report_error
 
@@ -231,7 +234,7 @@ solveC CConsts {..} CVars {..} log_env =
                               go (j + 1)
                     go 0
 
-                    c_ontimepoint (fromIntegral init_loop.output_ind)
+                    c_ontimepoint (fromIntegral init_loop.output_ind) (getDiagnosticsCallback init_loop)
 
                     if implicit
                       then do
@@ -317,7 +320,7 @@ solveC CConsts {..} CVars {..} log_env =
                           go 0
 
                           s <- get
-                          liftIO $ c_ontimepoint (fromIntegral s.output_ind)
+                          liftIO $ c_ontimepoint (fromIntegral s.output_ind) (getDiagnosticsCallback s)
                           modify $ \s -> s {output_ind = s.output_ind + 1}
 
                           s <- get
@@ -404,7 +407,7 @@ solveC CConsts {..} CVars {..} log_env =
                                 go 0
 
                                 s <- get
-                                liftIO $ c_ontimepoint $ fromIntegral s.output_ind
+                                liftIO $ c_ontimepoint (fromIntegral s.output_ind) (getDiagnosticsCallback s)
                                 modify $ \s -> s {event_ind = s.event_ind + 1, output_ind = s.output_ind + 1}
                                 s <- get
                                 VSM.write c_n_rows 0 (fromIntegral s.output_ind)
@@ -419,7 +422,7 @@ solveC CConsts {..} CVars {..} log_env =
                               if (fromIntegral s.event_ind >= c_max_events)
                                 then do
                                   debug ("Reached max_events; returning")
-                                  VSM.write c_diagnostics 10 1
+                                  liftIO $ writeIORef odeMaxEventsReached True
                                   pure 1
                                 else pure stop_solver
                             when (stop_solver /= 0) $ do
@@ -434,6 +437,7 @@ solveC CConsts {..} CVars {..} log_env =
                                   liftIO $ cARKStepReInit cvode_mem c_rhs nullFunPtr t y >>= check 1576
                                 else do
                                   liftIO $ cARKStepReInit cvode_mem nullFunPtr c_rhs t y >>= check 1576
+                              modify $ \s -> s { nb_reinit = nb_reinit s + 1 }
 
                           when (t == ti) $ do
                             modify $ \s -> s {input_ind = s.input_ind + 1}
@@ -447,25 +451,28 @@ solveC CConsts {..} CVars {..} log_env =
                     resM <- try $ execStateT loop init_loop
                     case resM of
                       Left (ReturnCode c)
-                        | c == fromIntegral ARK_SUCCESS -> pure ARK_SUCCESS
-                        | otherwise -> pure $ (fromIntegral c)
+                        | c == fromIntegral ARK_SUCCESS -> pure (ARK_SUCCESS, mempty)
+                        | otherwise -> pure $ (fromIntegral c, mempty)
                       Left (ReturnCodeWithMessage _message c)
-                        | c == fromIntegral ARK_SUCCESS -> pure ARK_SUCCESS
-                        | otherwise -> pure $ (fromIntegral c)
-                      Right finalState -> end cvode_mem finalState
-                      Left (Break finalState) -> end cvode_mem finalState
-                      Left (Finish finalState) -> end cvode_mem finalState
+                        | c == fromIntegral ARK_SUCCESS -> pure (ARK_SUCCESS, mempty)
+                        | otherwise -> pure $ (fromIntegral c, mempty)
+                      Right finalState -> end cvode_mem odeMaxEventsReached finalState
+                      Left (Break finalState) -> end cvode_mem odeMaxEventsReached finalState
+                      Left (Finish finalState) -> end cvode_mem odeMaxEventsReached finalState
   where
-    end cvode_mem finalState = do
+    end cvode_mem odeMaxEventsReached finalState = do
       -- /* The number of actual roots we found */
       VSM.write c_n_events 0 (fromIntegral finalState.event_ind)
 
+      diagnostics <- getDiagnostics cvode_mem finalState c_method c_n_event_specs odeMaxEventsReached
+      pure (ARK_SUCCESS, diagnostics)
+
+getDiagnostics :: ARKodeMem -> LoopState -> CInt -> CInt -> IORef Bool -> IO SundialsDiagnostics
+getDiagnostics cvode_mem loopState c_method c_n_event_specs odeMaxEventsReached = do
       -- /* Get some final statistics on how the solve progressed */
       nst <- cvGet cARKodeGetNumSteps cvode_mem
-      VSM.write c_diagnostics 0 (fromIntegral nst)
 
       nst_a <- cvGet cARKodeGetNumStepAttempts cvode_mem
-      VSM.write c_diagnostics 1 (fromIntegral nst_a)
 
       (nfe, nfi) <- alloca $ \nfe -> do
         alloca $ \nfi -> do
@@ -475,35 +482,50 @@ solveC CConsts {..} CVars {..} log_env =
 
           (,) <$> peek nfe <*> peek nfi
 
-      VSM.write c_diagnostics 2 (fromIntegral nfe)
-      VSM.write c_diagnostics 3 (fromIntegral nfi)
-
       nsetups <- cvGet cARKodeGetNumLinSolvSetups cvode_mem
-      VSM.write c_diagnostics 4 (fromIntegral nsetups)
 
       netf <- cvGet cARKodeGetNumErrTestFails cvode_mem
-      VSM.write c_diagnostics 5 (fromIntegral netf)
 
       nni <- cvGet cARKodeGetNumNonlinSolvIters cvode_mem
-      VSM.write c_diagnostics 6 (fromIntegral nni)
 
       let implicit = c_method >= ARKODE_MIN_DIRK_NUM
-      if implicit
+      (ncfn, nje, nfeLS) <- if implicit
         then do
           ncfn <- cvGet cARKodeGetNumNonlinSolvConvFails cvode_mem
-          VSM.write c_diagnostics 7 (fromIntegral ncfn)
 
           nje <- cvGet cARKodeGetNumJacEvals cvode_mem
-          VSM.write c_diagnostics 8 (fromIntegral nje)
 
           nfeLS <- cvGet cARKodeGetNumLinRhsEvals cvode_mem
-          VSM.write c_diagnostics 9 (fromIntegral nfeLS)
-        else do
-          VSM.write c_diagnostics 7 0
-          VSM.write c_diagnostics 8 0
-          VSM.write c_diagnostics 9 0
 
-      pure ARK_SUCCESS
+          pure (ncfn, nje, nfeLS)
+        else do
+          pure (0, 0, 0)
+
+      maxEventReached <- readIORef odeMaxEventsReached
+
+      -- It is surprising but this command fails with ARKode only when no root
+      -- are set
+      gevals <- if c_n_event_specs /= 0
+                then cvGet cARKodeGetNumGEvals cvode_mem
+                else pure 0
+
+      let diagnostics = SundialsDiagnostics
+             (fromIntegral $ nst)
+             (fromIntegral $ nst_a)
+             (fromIntegral $ nfe)
+             (fromIntegral $ nfi)
+             (fromIntegral $ nsetups)
+             (fromIntegral $ netf)
+             (fromIntegral $ nni)
+             (fromIntegral $ ncfn)
+             (fromIntegral $ nje)
+             (fromIntegral $ nfeLS)
+             maxEventReached
+             (fromIntegral gevals)
+             (nb_reinit loopState)
+
+
+      pure diagnostics
 
 --  |]
 
@@ -634,6 +656,9 @@ foreign import ccall "ARKStepGetNumRhsEvals" cARKStepGetNumRhsEvals :: ARKodeMem
 foreign import ccall "ARKodeGetNumLinRhsEvals" cARKodeGetNumLinRhsEvals :: ARKodeMem -> Ptr CLong -> IO CInt
 
 foreign import ccall "ARKodeGetNumStepAttempts" cARKodeGetNumStepAttempts :: ARKodeMem -> Ptr CLong -> IO CInt
+
+foreign import ccall "ARKodeGetNumGEvals" cARKodeGetNumGEvals :: ARKodeMem -> Ptr CLong -> IO CInt
+
 
 cvGet :: (HasCallStack) => (Storable b) => (ARKodeMem -> Ptr b -> IO CInt) -> ARKodeMem -> IO b
 cvGet getter cvode_mem = do

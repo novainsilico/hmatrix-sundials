@@ -9,17 +9,19 @@
             3
         ],
         "diagnostics": {
-            "dlsGetNumJacEvals": 0,
-            "dlsGetNumRhsEvals": 0,
+            "dlsGetNumJacEvals": 20,
+            "dlsGetNumRhsEvals": 20,
             "odeGetNumErrTestFails": 0,
             "odeGetNumLinSolvSetups": 0,
             "odeGetNumNonlinSolvConvFails": 0,
-            "odeGetNumNonlinSolvIters": 3,
+            "odeGetNumNonlinSolvIters": 0,
             "odeGetNumRhsEvals_fe": 0,
             "odeGetNumRhsEvals_fi": 0,
             "odeGetNumStepAttempts": 0,
             "odeGetNumSteps": 0,
-            "odeMaxEventsReached": false
+            "odeMaxEventsReached": false,
+            "odeNumReinit": 3,
+            "odeNumRootEvals": 0
         },
         "solutionMatrix": [
             [
@@ -29,16 +31,16 @@
                 0.2
             ],
             [
-                1.2000000000000004
+                1.1999999999999995
             ],
             [
-                1.4000000000000004
+                1.3999999999999995
             ],
             [
-                2.4
+                2.3999999999999995
             ],
             [
-                2.6
+                2.5999999999999996
             ]
         ]
     }

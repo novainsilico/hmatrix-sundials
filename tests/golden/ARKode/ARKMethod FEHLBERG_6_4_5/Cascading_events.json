@@ -13,11 +13,13 @@
             "odeGetNumLinSolvSetups": 0,
             "odeGetNumNonlinSolvConvFails": 0,
             "odeGetNumNonlinSolvIters": 0,
-            "odeGetNumRhsEvals_fe": 40,
+            "odeGetNumRhsEvals_fe": 35,
             "odeGetNumRhsEvals_fi": 0,
             "odeGetNumStepAttempts": 5,
             "odeGetNumSteps": 5,
-            "odeMaxEventsReached": false
+            "odeMaxEventsReached": false,
+            "odeNumReinit": 1,
+            "odeNumRootEvals": 6
         },
         "solutionMatrix": [
             [

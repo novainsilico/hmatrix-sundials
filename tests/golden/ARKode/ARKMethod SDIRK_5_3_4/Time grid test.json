@@ -8,8 +8,8 @@
             100
         ],
         "diagnostics": {
-            "dlsGetNumJacEvals": 0,
-            "dlsGetNumRhsEvals": 0,
+            "dlsGetNumJacEvals": 1,
+            "dlsGetNumRhsEvals": 1,
             "odeGetNumErrTestFails": 0,
             "odeGetNumLinSolvSetups": 9,
             "odeGetNumNonlinSolvConvFails": 0,
@@ -18,23 +18,25 @@
             "odeGetNumRhsEvals_fi": 129,
             "odeGetNumStepAttempts": 9,
             "odeGetNumSteps": 9,
-            "odeMaxEventsReached": false
+            "odeMaxEventsReached": false,
+            "odeNumReinit": 0,
+            "odeNumRootEvals": 0
         },
         "solutionMatrix": [
             [
                 0
             ],
             [
-                1.0000000000000004
+                1.0000000000000002
             ],
             [
                 3.0000000000000044
             ],
             [
-                13.000000000000007
+                13.000000000000004
             ],
             [
-                102.99999999999994
+                102.99999999999993
             ]
         ]
     }
