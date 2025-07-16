@@ -105,7 +105,7 @@ solveC CConsts {..} CVars {..} log_env =
               VS.imapM_ (\i v -> cNV_Ith_S y i v) c_init_cond
 
               -- // NB: Uses the Newton solver by default
-              withCVodeMem c_method sunctx 8396 $ \cvode_mem -> do
+              withCVodeMem c_method sunctx 8396 $ \cvode_mem -> handleTermination CV_SUCCESS (getDiagnostics cvode_mem) $ do
                 let getDiagnosticsCallback loopState = getDiagnostics cvode_mem loopState
                 cCVodeInit cvode_mem c_rhs t0 y >>= check 1960
 
@@ -384,21 +384,7 @@ solveC CConsts {..} CVars {..} log_env =
 
                           modify $ \s -> s {t_start = t}
                           loop
-                    resM <- try $ execStateT loop init_loop
-                    case resM of
-                      Left (ReturnCode c)
-                        | c == fromIntegral IDA_SUCCESS -> pure (IDA_SUCCESS, mempty)
-                        | otherwise -> pure $ (fromIntegral c, mempty)
-                      Left (ReturnCodeWithMessage _message c)
-                        | c == fromIntegral IDA_SUCCESS -> pure (IDA_SUCCESS, mempty)
-                        | otherwise -> pure $ (fromIntegral c, mempty)
-                      Right finalState -> end cvode_mem finalState
-                      Left (Break finalState) -> end cvode_mem finalState
-                      Left (Finish finalState) -> end cvode_mem finalState
-  where
-    end cvode_mem finalState = do
-      diagnostics <- getDiagnostics cvode_mem finalState
-      pure (CV_SUCCESS, diagnostics)
+                    execStateT loop init_loop
 
 getDiagnostics :: CVodeMem -> LoopState -> IO SundialsDiagnostics
 getDiagnostics cvode_mem loopState = do

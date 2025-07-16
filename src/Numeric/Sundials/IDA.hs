@@ -103,7 +103,7 @@ solveC CConsts {..} CVars {..} log_env =
               VS.imapM_ (\i v -> cNV_Ith_S y i v) c_init_cond
               VS.imapM_ (\i v -> cNV_Ith_S yp i v) c_init_differentials
 
-              withIDACreate sunctx 8396 $ \ida_mem -> do
+              withIDACreate sunctx 8396 $ \ida_mem -> handleTermination IDA_SUCCESS (getDiagnostics ida_mem) $ do
                 let getDiagnosticsCallback state = getDiagnostics ida_mem state
                 cIDAInit ida_mem c_ida_res t0 y yp >>= check 1234
                 -- /* Set the error handler */
@@ -413,22 +413,7 @@ solveC CConsts {..} CVars {..} log_env =
 
                           next_time_event <- liftIO c_next_time_event
                           loop next_time_event
-                    resM <- try $ execStateT (loop first_time_event) init_loop
-                    case resM of
-                      Left (ReturnCode c)
-                        | c == fromIntegral IDA_SUCCESS -> pure (IDA_SUCCESS, mempty)
-                        | otherwise -> pure $ (fromIntegral c, mempty)
-                      Left (ReturnCodeWithMessage _message c)
-                        | c == fromIntegral IDA_SUCCESS -> pure (IDA_SUCCESS, mempty)
-                        | otherwise -> pure $ (fromIntegral c, mempty)
-                      Right finalState -> end ida_mem finalState
-                      Left (Break finalState) -> end ida_mem finalState
-                      Left (Finish finalState) -> end ida_mem finalState
-  where
-    end cvode_mem finalState = do
-      diagnostics <- getDiagnostics cvode_mem finalState
-      pure (IDA_SUCCESS, diagnostics)
-
+                    execStateT (loop first_time_event) init_loop
 
 getDiagnostics :: IDAMem -> LoopState -> IO SundialsDiagnostics
 getDiagnostics cvode_mem loopState = do

@@ -157,8 +157,8 @@ solveC CConsts {..} CVars {..} log_env =
               let withArkStep
                     | not implicit = \c_rhs -> withARKStepCreate c_rhs nullFunPtr
                     | otherwise = \c_rhs -> withARKStepCreate nullFunPtr c_rhs
-              withArkStep c_rhs t0 y sunctx 8396 $ \cvode_mem -> do
-                let getDiagnosticsCallback state = getDiagnostics cvode_mem state c_method c_n_event_specs
+              withArkStep c_rhs t0 y sunctx 8396 $ \cvode_mem -> handleTermination ARK_SUCCESS (getDiagnostics cvode_mem c_method c_n_event_specs) $ do
+                let getDiagnosticsCallback state = getDiagnostics cvode_mem c_method c_n_event_specs state
                 -- /* Set the error handler */
                 setErrorHandler sunctx c_report_error
 
@@ -445,24 +445,10 @@ solveC CConsts {..} CVars {..} log_env =
 
                           modify $ \s -> s {t_start = t}
                           loop
-                    resM <- try $ execStateT loop init_loop
-                    case resM of
-                      Left (ReturnCode c)
-                        | c == fromIntegral ARK_SUCCESS -> pure (ARK_SUCCESS, mempty)
-                        | otherwise -> pure $ (fromIntegral c, mempty)
-                      Left (ReturnCodeWithMessage _message c)
-                        | c == fromIntegral ARK_SUCCESS -> pure (ARK_SUCCESS, mempty)
-                        | otherwise -> pure $ (fromIntegral c, mempty)
-                      Right finalState -> end cvode_mem finalState
-                      Left (Break finalState) -> end cvode_mem finalState
-                      Left (Finish finalState) -> end cvode_mem finalState
-  where
-    end cvode_mem finalState = do
-      diagnostics <- getDiagnostics cvode_mem finalState c_method c_n_event_specs
-      pure (ARK_SUCCESS, diagnostics)
+                    execStateT loop init_loop
 
-getDiagnostics :: ARKodeMem -> LoopState -> CInt -> CInt -> IO SundialsDiagnostics
-getDiagnostics cvode_mem loopState c_method c_n_event_specs = do
+getDiagnostics :: ARKodeMem -> CInt -> CInt -> LoopState -> IO SundialsDiagnostics
+getDiagnostics cvode_mem c_method c_n_event_specs loopState = do
       -- /* Get some final statistics on how the solve progressed */
       nst <- cvGet cARKodeGetNumSteps cvode_mem
 

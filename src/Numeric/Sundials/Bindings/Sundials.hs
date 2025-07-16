@@ -247,3 +247,29 @@ data LoopState = LoopState
 All the call are marked (implicitly) as "safe" because they can, in theory, all call the log callback and hence "unsafe" is not relevant.
 
 -}
+
+-- | This function is wrapping the complete solver initialisation + loop and
+-- catch exceptions (well, the one from 'ReturnCode' and provides diagnostics.
+--
+-- In the future, we would like to refactor / clean this because for now:
+--
+-- - The semantic of 'ReturnCode' is ugly and comes from the old C loop
+-- - The function is not exception safe and can actually (may, may not, who
+-- really know) raise other exceptions which are not documented.
+handleTermination :: CInt -> (LoopState -> IO SundialsDiagnostics) -> IO LoopState -> IO (CInt, SundialsDiagnostics)
+handleTermination success getDiagnostics action = do
+  let end finalState = do
+      diagnostics <- getDiagnostics finalState
+      pure (success, diagnostics)
+       
+  resM <- try action
+  case resM of
+    Left (ReturnCode c)
+      | c == fromIntegral success -> pure (success, mempty)
+      | otherwise -> pure $ (fromIntegral c, mempty)
+    Left (ReturnCodeWithMessage _message c)
+      | c == fromIntegral success -> pure (success, mempty)
+      | otherwise -> pure $ (fromIntegral c, mempty)
+    Right finalState -> end finalState
+    Left (Break finalState) -> end finalState
+    Left (Finish finalState) -> end finalState
