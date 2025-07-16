@@ -357,7 +357,7 @@ idaTests = testGroup "IDASolver" $ [
        -- x - 2 = 0 => x = 2
        VS.fromList [2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0]
       ]
-  ,testCase "behaves propertly on impossible constraint" $ do
+  ,testCase "behaves properly on impossible constraint" $ do
     -- The system is x(0) = 0, dx/dt = 1, hence x is growing
     -- I do have an algebraic constraint, x + abs(y) = 0. Hence it can be
     -- satisfied at t=0, but not after.
@@ -385,7 +385,7 @@ idaTests = testGroup "IDASolver" $ [
     -- Hence ln(y) = -x
     --       y = exp(-x)
     --
-    -- This can be satisfyied. However if y(0) = 0, the first evaluation of the
+    -- This can be satisfied. However if y(0) = 0, the first evaluation of the
     -- algebraic gives -inf. It should either fail OR fix the value of y(0) = 1
     --
     -- It actually fails, which is a good news.
