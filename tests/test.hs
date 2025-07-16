@@ -357,6 +357,54 @@ idaTests = testGroup "IDASolver" $ [
        -- x - 2 = 0 => x = 2
        VS.fromList [2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0]
       ]
+  ,testCase "behaves properly on impossible constraint" $ do
+    -- The system is x(0) = 0, dx/dt = 1, hence x is growing
+    -- I do have an algebraic constraint, x + abs(y) = 0. Hence it can be
+    -- satisfied at t=0, but not after.
+    --
+    -- I want to check that the solver is failing, hence pattern match on Left
+    Left e <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
+                  { 
+                    odeFunctions = ResidualProblemFunctions ResidualFunctions {
+                              odeResidual = OdeResidualHaskell $ \_t y yp -> pure ([
+                                  yp VS.! 0 - 1,
+                                  y VS.! 0 + abs(y VS.! 1)
+                                  ])
+                            , odeDifferentials = VS.fromList [1.0, 0.0]
+                            , odeInitialDifferentials = VS.fromList [50, 100]
+                              }
+                  , odeJacobian = Nothing
+                  , odeInitCond = [0, 123]
+                  , odeSolTimes = VS.fromList [0..10]
+                  , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
+                  }
+    pure ()
+  ,testCase "infinity in constraint" $ do
+    -- The system is x(0) = 0, dx/dt = 1, hence x is growing
+    -- I do have an algebraic constraint, x + ln(y) = 0
+    -- Hence ln(y) = -x
+    --       y = exp(-x)
+    --
+    -- This can be satisfied. However if y(0) = 0, the first evaluation of the
+    -- algebraic gives -inf. It should either fail OR fix the value of y(0) = 1
+    --
+    -- It actually fails, which is a good news.
+    Left e <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
+                  { 
+                    odeFunctions = ResidualProblemFunctions ResidualFunctions {
+                              odeResidual = OdeResidualHaskell $ \_t y yp -> pure ([
+                                  yp VS.! 0 - 1,
+                                  y VS.! 0 + log(y VS.! 1)
+                                  ])
+                            , odeDifferentials = VS.fromList [1.0, 0.0]
+                            , odeInitialDifferentials = VS.fromList [0.0, 0.0]
+                              }
+                  , odeJacobian = Nothing
+                  , odeInitCond = [0, 0]
+                  , odeSolTimes = VS.fromList [0..10]
+                  , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
+                  }
+    pure ()
  ]
 
 

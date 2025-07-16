@@ -32,8 +32,6 @@ data CVars vec = CVars
   , c_event_time :: vec CDouble
     -- ^ For each event occurrence, this indicates the time of the
     -- occurrence. Size: max_num_events.
-  , c_n_events :: vec CInt
-    -- ^ Vector of size 1 that gives the total number of events occurred.
   , c_n_rows :: vec CInt
     -- ^ The total number of rows in the output matrix.
   , c_output_mat :: vec CDouble
@@ -60,7 +58,6 @@ allocateCVars OdeProblem{..} = do
   c_event_index <- VSM.new odeMaxEvents
   c_event_time <- VSM.new odeMaxEvents
   c_actual_event_direction <- VSM.new odeMaxEvents
-  c_n_events <- VSM.new 1
   c_n_rows <- VSM.new 1
   c_local_error <- VSM.new dim
   c_var_weight <- VSM.new dim
@@ -77,7 +74,6 @@ freezeCVars CVars{..} = do
   c_event_index <- VS.unsafeFreeze c_event_index
   c_event_time <- VS.unsafeFreeze c_event_time
   c_actual_event_direction <- VS.unsafeFreeze c_actual_event_direction
-  c_n_events <- VS.unsafeFreeze c_n_events
   c_n_rows <- VS.unsafeFreeze c_n_rows
   c_output_mat <- VS.unsafeFreeze c_output_mat
   c_local_error <- VS.unsafeFreeze c_local_error
