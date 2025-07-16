@@ -33,7 +33,6 @@ import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
 import Text.Printf (printf)
 import Data.Coerce (coerce)
-import Data.IORef (readIORef, newIORef, writeIORef, IORef)
 
 -- | Available methods for CVode
 data CVMethod
@@ -81,7 +80,8 @@ solveC CConsts {..} CVars {..} log_env =
                         --    an event may have eventRecord = False and not be present there.
                         -- \*/
                         t_start = t0,
-                        nb_reinit = 0
+                        nb_reinit = 0,
+                        max_events_reached = False
                       }
                   )
 
@@ -99,9 +99,6 @@ solveC CConsts {..} CVars {..} log_env =
 
             -- /* Initialize data structures */
 
-            -- /* Initialize odeMaxEventsReached to False */
-            odeMaxEventsReached <- newIORef False
-
             -- /* Create serial vector for solution */
             withNVector_Serial c_dim sunctx 6896 $ \y -> do
               -- /* Specify initial condition */
@@ -109,7 +106,7 @@ solveC CConsts {..} CVars {..} log_env =
 
               -- // NB: Uses the Newton solver by default
               withCVodeMem c_method sunctx 8396 $ \cvode_mem -> do
-                let getDiagnosticsCallback loopState = getDiagnostics cvode_mem loopState odeMaxEventsReached
+                let getDiagnosticsCallback loopState = getDiagnostics cvode_mem loopState
                 cCVodeInit cvode_mem c_rhs t0 y >>= check 1960
 
                 -- /* Set the error handler */
@@ -365,7 +362,7 @@ solveC CConsts {..} CVars {..} log_env =
                               if (fromIntegral s.event_ind >= c_max_events)
                                 then do
                                   debug ("Reached max_events; returning")
-                                  liftIO $ writeIORef odeMaxEventsReached True
+                                  modify $ \s -> s {max_events_reached = True }
                                   pure 1
                                 else pure stop_solver
                             when (stop_solver /= 0) $ do
@@ -395,16 +392,16 @@ solveC CConsts {..} CVars {..} log_env =
                       Left (ReturnCodeWithMessage _message c)
                         | c == fromIntegral IDA_SUCCESS -> pure (IDA_SUCCESS, mempty)
                         | otherwise -> pure $ (fromIntegral c, mempty)
-                      Right finalState -> end cvode_mem odeMaxEventsReached finalState
-                      Left (Break finalState) -> end cvode_mem odeMaxEventsReached finalState
-                      Left (Finish finalState) -> end cvode_mem odeMaxEventsReached finalState
+                      Right finalState -> end cvode_mem finalState
+                      Left (Break finalState) -> end cvode_mem finalState
+                      Left (Finish finalState) -> end cvode_mem finalState
   where
-    end cvode_mem odeMaxEventsReached finalState = do
-      diagnostics <- getDiagnostics cvode_mem finalState odeMaxEventsReached
+    end cvode_mem finalState = do
+      diagnostics <- getDiagnostics cvode_mem finalState
       pure (CV_SUCCESS, diagnostics)
 
-getDiagnostics :: CVodeMem -> LoopState -> IORef Bool -> IO SundialsDiagnostics
-getDiagnostics cvode_mem loopState odeMaxEventsReached = do
+getDiagnostics :: CVodeMem -> LoopState -> IO SundialsDiagnostics
+getDiagnostics cvode_mem loopState = do
       -- /* Get some final statistics on how the solve progressed */
       nst <- cvGet cCVodeGetNumSteps cvode_mem
 
@@ -428,8 +425,6 @@ getDiagnostics cvode_mem loopState odeMaxEventsReached = do
 
       nfeLS <- cvGet cCVodeGetNumLinRhsEvals cvode_mem
 
-      maxEventReached <- readIORef odeMaxEventsReached
-
       gevals <- cvGet cCVodeGetNumGEvals cvode_mem
 
       let diagnostics = SundialsDiagnostics
@@ -443,7 +438,7 @@ getDiagnostics cvode_mem loopState odeMaxEventsReached = do
              (fromIntegral $ ncfn)
              (fromIntegral $ nje)
              (fromIntegral $ nfeLS)
-             maxEventReached
+             (max_events_reached loopState)
              (fromIntegral gevals)
              (nb_reinit loopState)
       pure diagnostics

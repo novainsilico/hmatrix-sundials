@@ -235,7 +235,9 @@ data LoopState = LoopState
     event_ind :: {-# UNPACK #-} !Int,
     t_start :: {-# UNPACK #-} !CDouble,
     -- Count the number of reinit of the solver
-    nb_reinit :: {-# UNPACK #-} !Int
+    nb_reinit :: {-# UNPACK #-} !Int,
+    -- | Did we reached the maximum number of event
+    max_events_reached :: {-# UNPACK #-} !Bool
   }
   deriving (Show)
 
