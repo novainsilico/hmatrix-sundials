@@ -429,9 +429,6 @@ solveC CConsts {..} CVars {..} log_env =
                       Left (Finish finalState) -> end ida_mem odeMaxEventsReached finalState
   where
     end cvode_mem odeMaxEventsReached finalState = do
-      -- /* The number of actual roots we found */
-      VSM.write c_n_events 0 (fromIntegral finalState.event_ind)
-
       diagnostics <- getDiagnostics cvode_mem finalState odeMaxEventsReached
       pure (IDA_SUCCESS, diagnostics)
 
