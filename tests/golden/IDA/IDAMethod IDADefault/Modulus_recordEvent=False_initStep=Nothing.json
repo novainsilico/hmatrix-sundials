@@ -5,13 +5,13 @@
             10
         ],
         "diagnostics": {
-            "dlsGetNumJacEvals": 61,
-            "dlsGetNumRhsEvals": 61,
+            "dlsGetNumJacEvals": 2,
+            "dlsGetNumRhsEvals": 2,
             "odeGetNumErrTestFails": 0,
-            "odeGetNumLinSolvSetups": 0,
+            "odeGetNumLinSolvSetups": 2,
             "odeGetNumNonlinSolvConvFails": 0,
-            "odeGetNumNonlinSolvIters": 0,
-            "odeGetNumRhsEvals_fe": 0,
+            "odeGetNumNonlinSolvIters": 1,
+            "odeGetNumRhsEvals_fe": 3,
             "odeGetNumRhsEvals_fi": 0,
             "odeGetNumStepAttempts": 0,
             "odeGetNumSteps": 0,
@@ -24,7 +24,7 @@
                 0
             ],
             [
-                5.000023193384628
+                5.0000253777554855
             ]
         ]
     }

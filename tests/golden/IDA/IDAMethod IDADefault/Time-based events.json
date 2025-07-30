@@ -10,13 +10,13 @@
             4
         ],
         "diagnostics": {
-            "dlsGetNumJacEvals": 20,
-            "dlsGetNumRhsEvals": 40,
+            "dlsGetNumJacEvals": 22,
+            "dlsGetNumRhsEvals": 44,
             "odeGetNumErrTestFails": 0,
-            "odeGetNumLinSolvSetups": 20,
+            "odeGetNumLinSolvSetups": 22,
             "odeGetNumNonlinSolvConvFails": 0,
             "odeGetNumNonlinSolvIters": 22,
-            "odeGetNumRhsEvals_fe": 22,
+            "odeGetNumRhsEvals_fe": 24,
             "odeGetNumRhsEvals_fi": 0,
             "odeGetNumStepAttempts": 0,
             "odeGetNumSteps": 22,
