@@ -28,19 +28,19 @@
             0.22
         ],
         "diagnostics": {
-            "dlsGetNumJacEvals": 15,
-            "dlsGetNumRhsEvals": 15,
+            "dlsGetNumJacEvals": 18,
+            "dlsGetNumRhsEvals": 18,
             "odeGetNumErrTestFails": 0,
-            "odeGetNumLinSolvSetups": 15,
+            "odeGetNumLinSolvSetups": 18,
             "odeGetNumNonlinSolvConvFails": 0,
-            "odeGetNumNonlinSolvIters": 29,
-            "odeGetNumRhsEvals_fe": 29,
+            "odeGetNumNonlinSolvIters": 30,
+            "odeGetNumRhsEvals_fe": 32,
             "odeGetNumRhsEvals_fi": 0,
             "odeGetNumStepAttempts": 0,
-            "odeGetNumSteps": 24,
+            "odeGetNumSteps": 25,
             "odeMaxEventsReached": false,
             "odeNumReinit": 1,
-            "odeNumRootEvals": 37
+            "odeNumRootEvals": 38
         },
         "solutionMatrix": [
             [
@@ -80,43 +80,43 @@
                 2
             ],
             [
-                2.009402978669577
+                2.0094029778497307
             ],
             [
-                2.0295980175376434
+                2.029598058055422
             ],
             [
-                2.0499961929869923
+                2.0499962318930467
             ],
             [
-                2.070599383196162
+                2.070599521785802
             ],
             [
-                2.091409514584801
+                2.091409788449349
             ],
             [
-                2.1124286201197346
+                2.112429044841546
             ],
             [
-                2.133658830409103
+                2.1336593371895374
             ],
             [
-                2.155102321807289
+                2.155102836274035
             ],
             [
-                2.1767613279000324
+                2.1767618209037454
             ],
             [
-                2.1986380641041525
+                2.1986384846194498
             ],
             [
-                2.220734718219442
+                2.2207350775049797
             ],
             [
-                2.243053478893935
+                2.2430538055714933
             ],
             [
-                2.265596543262559
+                2.265596883366736
             ]
         ]
     }

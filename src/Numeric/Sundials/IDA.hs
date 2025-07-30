@@ -18,6 +18,8 @@ where
 import Control.Exception
 import Control.Monad (when)
 import Control.Monad.State
+import Data.Bool (bool)
+import Data.Coerce (coerce)
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Storable.Mutable as VSM
@@ -31,8 +33,6 @@ import Numeric.Sundials.Bindings.Sundials
 import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
 import Text.Printf (printf)
-import Data.Coerce (coerce)
-import Data.Bool (bool)
 
 -- | Available methods for IDA
 data IDAMethod = IDADefault
@@ -110,7 +110,7 @@ solveC CConsts {..} CVars {..} log_env =
                 setErrorHandler sunctx c_report_error
 
                 when (c_fixedstep > 0.0) $ do
-                   throwIO $ ReturnCodeWithMessage "fixedStep cannot be used with IDA" 6426
+                  throwIO $ ReturnCodeWithMessage "fixedStep cannot be used with IDA" 6426
 
                 -- /* Set the user data */
                 cIDASetUserData ida_mem c_rhs_userdata >>= check 1949
@@ -142,19 +142,19 @@ solveC CConsts {..} CVars {..} log_env =
 
                   -- /* Initialize a jacobian matrix and solver */
                   let withLinearSolver f = do
-                            if (c_sparse_jac /= 0)
-                              then do
-                                withSUNSparseMatrix c_dim c_dim c_sparse_jac CSC_MAT sunctx 9061 $ \a -> do
-                                  withSUNLinSol_KLU y a sunctx 9316 $ \ls -> do
-                                    -- /* Attach matrix and linear solver */
-                                    cIDASetLinearSolver ida_mem ls a >>= check 2625
-                                    f
-                              else do
-                                withSUNDenseMatrix c_dim c_dim sunctx 9316 $ \a -> do
-                                  withSUNLinSol_Dense y a sunctx 9316 $ \ls -> do
-                                    -- /* Attach matrix and linear solver */
-                                    cIDASetLinearSolver ida_mem ls a >>= check 2625
-                                    f
+                        if (c_sparse_jac /= 0)
+                          then do
+                            withSUNSparseMatrix c_dim c_dim c_sparse_jac CSC_MAT sunctx 9061 $ \a -> do
+                              withSUNLinSol_KLU y a sunctx 9316 $ \ls -> do
+                                -- /* Attach matrix and linear solver */
+                                cIDASetLinearSolver ida_mem ls a >>= check 2625
+                                f
+                          else do
+                            withSUNDenseMatrix c_dim c_dim sunctx 9316 $ \a -> do
+                              withSUNLinSol_Dense y a sunctx 9316 $ \ls -> do
+                                -- /* Attach matrix and linear solver */
+                                cIDASetLinearSolver ida_mem ls a >>= check 2625
+                                f
 
                   withLinearSolver $ do
                     -- /* Set the initial step size if there is one */
@@ -172,7 +172,7 @@ solveC CConsts {..} CVars {..} log_env =
 
                     first_time_event <- liftIO c_next_time_event
                     -- if any of the value is algebraic, we try to setup the initial condition
-                    when (VS.any (==0.0) c_is_differential) $ do
+                    when (VS.any (== 0.0) c_is_differential) $ do
                       let ti = fromMaybe (error "Incorrect c_sol_time access") $ c_sol_time VS.!? 1
                       res <- cIDACalcIC ida_mem IDA_YA_YDP_INIT (if first_time_event > t0 && not (isInfinite first_time_event) then first_time_event else ti)
                       when (res /= IDA_SUCCESS) $ check (fromIntegral res) res
@@ -216,22 +216,19 @@ solveC CConsts {..} CVars {..} log_env =
                           (t, flag) <- liftIO $ alloca $ \t_ptr -> do
                             flag <- cIDASolve ida_mem next_stop_time t_ptr y yp IDA_NORMAL
                             if flag == IDA_ILL_INPUT
-                            then do
-                              cIDAGetCurrentTime ida_mem t_ptr >>= check 123453
-                              t <- peek t_ptr
-                              if t == next_stop_time then
-                                -- This is an emulation of CV_TOO_CLOSE
-                                -- Which IDA do not support. We just catch the
-                                -- IDA_ILL_INPUT as well as comparing the t and
-                                -- hope for the best.
-                                pure (t, CV_TOO_CLOSE)
-                              else
-                                pure (t, IDA_ILL_INPUT)
-
-                            else do
-                              t <- peek t_ptr
-                              pure (t, flag)
-
+                              then do
+                                cIDAGetCurrentTime ida_mem t_ptr >>= check 123453
+                                t <- peek t_ptr
+                                if t == next_stop_time
+                                  then -- This is an emulation of CV_TOO_CLOSE
+                                  -- Which IDA do not support. We just catch the
+                                  -- IDA_ILL_INPUT as well as comparing the t and
+                                  -- hope for the best.
+                                    pure (t, CV_TOO_CLOSE)
+                                  else pure (t, IDA_ILL_INPUT)
+                              else do
+                                t <- peek t_ptr
+                                pure (t, flag)
 
                           debug $ printf "IDASolve returned %d; now t = %.17g\n" (fromIntegral flag :: Int) (coerce t :: Double)
                           let root_based_event = flag == IDA_ROOT_RETURN
@@ -389,7 +386,7 @@ solveC CConsts {..} CVars {..} log_env =
                               if (fromIntegral s.event_ind >= c_max_events)
                                 then do
                                   debug ("Reached max_events; returning")
-                                  modify $ \s -> s {max_events_reached = True }
+                                  modify $ \s -> s {max_events_reached = True}
                                   pure 1
                                 else pure stop_solver
                             when (stop_solver /= 0) $ do
@@ -400,7 +397,15 @@ solveC CConsts {..} CVars {..} log_env =
                             when (n_events_triggered > 0 || time_based_event) $ do
                               debug ("Re-initializing the system")
                               liftIO $ cIDAReInit ida_mem t y yp >>= check 1576
-                              modify $ \s -> s { nb_reinit = nb_reinit s + 1 }
+                              modify $ \s -> s {nb_reinit = nb_reinit s + 1}
+                              -- excerpt from the documentation:
+                              -- here the requested time is the first value for which a solution will be requested (from IDASolve()).
+                              -- This value is needed here only to determine the direction of integration and rough scale in the independent variable
+                              --
+                              -- it would make sense to use "next_stop_time", however this will sometimes fail with
+                              -- "tout1 too close to t0 to attempt initial condition calculation"
+                              -- so we use "next_stop_time * 1.1" instead which is highly questionable but seems to work in practice...
+                              liftIO $ cIDACalcIC ida_mem IDA_YA_YDP_INIT (next_stop_time * 1.1) >>= check 5220
 
                           when (t == ti) $ do
                             modify $ \s -> s {input_ind = s.input_ind + 1}
@@ -417,47 +422,47 @@ solveC CConsts {..} CVars {..} log_env =
 
 getDiagnostics :: IDAMem -> LoopState -> IO SundialsDiagnostics
 getDiagnostics cvode_mem loopState = do
-      -- /* Get some final statistics on how the solve progressed */
-      nst <- cvGet cIDAGetNumSteps cvode_mem
+  -- /* Get some final statistics on how the solve progressed */
+  nst <- cvGet cIDAGetNumSteps cvode_mem
 
-      -- This diagnostic is not available with IDA
-      let nst_a = 0 :: Int
+  -- This diagnostic is not available with IDA
+  let nst_a = 0 :: Int
 
-   
-      nfe <- cvGet cIDAGetNumResEvals cvode_mem
+  nfe <- cvGet cIDAGetNumResEvals cvode_mem
 
-      -- This diagnostic is not available with IDA
-      let nfi = 0 :: Int
+  -- This diagnostic is not available with IDA
+  let nfi = 0 :: Int
 
-      nsetups <- cvGet cIDAGetNumLinSolvSetups cvode_mem
+  nsetups <- cvGet cIDAGetNumLinSolvSetups cvode_mem
 
-      netf <- cvGet cIDAGetNumErrTestFails cvode_mem
+  netf <- cvGet cIDAGetNumErrTestFails cvode_mem
 
-      nni <- cvGet cIDAGetNumNonlinSolvIters cvode_mem
+  nni <- cvGet cIDAGetNumNonlinSolvIters cvode_mem
 
-      ncfn <- cvGet cIDAGetNumNonlinSolvConvFails cvode_mem
+  ncfn <- cvGet cIDAGetNumNonlinSolvConvFails cvode_mem
 
-      nje <- cvGet cIDAGetNumJacEvals cvode_mem
+  nje <- cvGet cIDAGetNumJacEvals cvode_mem
 
-      nfeLS <- cvGet cIDAGetNumLinResEvals cvode_mem
+  nfeLS <- cvGet cIDAGetNumLinResEvals cvode_mem
 
-      gevals <- cvGet cIDAGetNumGEvals cvode_mem
+  gevals <- cvGet cIDAGetNumGEvals cvode_mem
 
-      let diagnostics = SundialsDiagnostics
-             (fromIntegral $ nst)
-             (fromIntegral $ nst_a)
-             (fromIntegral $ nfe)
-             (fromIntegral $ nfi)
-             (fromIntegral $ nsetups)
-             (fromIntegral $ netf)
-             (fromIntegral $ nni)
-             (fromIntegral $ ncfn)
-             (fromIntegral $ nje)
-             (fromIntegral $ nfeLS)
-             (loopState.max_events_reached)
-             (fromIntegral gevals)
-             (nb_reinit loopState)
-      pure diagnostics
+  let diagnostics =
+        SundialsDiagnostics
+          (fromIntegral $ nst)
+          (fromIntegral $ nst_a)
+          (fromIntegral $ nfe)
+          (fromIntegral $ nfi)
+          (fromIntegral $ nsetups)
+          (fromIntegral $ netf)
+          (fromIntegral $ nni)
+          (fromIntegral $ ncfn)
+          (fromIntegral $ nje)
+          (fromIntegral $ nfeLS)
+          (loopState.max_events_reached)
+          (fromIntegral gevals)
+          (nb_reinit loopState)
+  pure diagnostics
 
 --  |]
 
@@ -548,6 +553,7 @@ foreign import ccall "IDASetLinearSolver" cIDASetLinearSolver :: IDAMem -> SUNLi
 foreign import ccall "IDASetInitStep" cIDASetInitStep :: IDAMem -> CDouble -> IO CInt
 
 foreign import ccall "IDASolve" cIDASolve :: IDAMem -> CDouble -> Ptr CDouble -> N_Vector -> N_Vector -> CInt -> IO CInt
+
 foreign import ccall "IDAGetCurrentTime" cIDAGetCurrentTime :: IDAMem -> Ptr CDouble -> IO CInt
 
 foreign import ccall "IDAReInit"
@@ -599,4 +605,3 @@ foreign import ccall "IDACalcIC" cIDACalcIC :: IDAMem -> CInt -> CDouble -> IO C
 foreign import ccall "IDAGetConsistentIC" cIDAGetConsistentIC :: IDAMem -> N_Vector -> N_Vector -> IO CInt
 
 foreign import ccall "IDASetId" cIDASetId :: IDAMem -> N_Vector -> IO CInt
-
