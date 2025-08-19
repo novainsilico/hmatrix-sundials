@@ -462,7 +462,7 @@ idaTests = testGroup "IDASolver" $ [
     -- satisfied at t=0, but not after.
     --
     -- I want to check that the solver is failing, hence pattern match on Left
-    Left e <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
+    Left _ <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
                   { 
                     odeFunctions = ResidualProblemFunctions ResidualFunctions {
                               odeResidual = OdeResidualHaskell $ \_t y yp -> pure ([
@@ -488,7 +488,7 @@ idaTests = testGroup "IDASolver" $ [
     -- algebraic gives -inf. It should either fail OR fix the value of y(0) = 1
     --
     -- It actually fails, which is a good news.
-    Left e <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
+    Left _ <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
                   { 
                     odeFunctions = ResidualProblemFunctions ResidualFunctions {
                               odeResidual = OdeResidualHaskell $ \_t y yp -> pure ([
