@@ -415,6 +415,47 @@ idaTests = testGroup "IDASolver" $ [
         -- Y. See how Y(5) = 6, then 12 after event
         VS.fromList [1, 2, 3, 4, 5,                         6, 12,       14, 16, 18, 20, 22]
         ]
+  ,testCase "algebraic event at t=0" $ do
+    -- This ensures that when an event fires at t=0, the solver do not crash with algebraic rules
+    let
+      update :: Double -> Vector Double -> Vector Double
+      update _t y = y VS.// [(0, -10)]
+
+    (time_ev_spec, time_ev_handler) <- mkTimeEvents
+      [ (0.0, update, False, True)
+      ]
+    Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
+                  { 
+                    odeFunctions = ResidualProblemFunctions ResidualFunctions {
+                              odeResidual = OdeResidualHaskell $ \_t y yp -> pure ([
+                                  -- dx/dt - 1 = 0
+                                  yp VS.! 0 - 1,
+                                  --  y - x = 0
+                                  y VS.! 1 - y VS.! 0
+                                  ])
+                            , odeDifferentials = VS.fromList [1, 0]
+                            , odeInitialDifferentials = VS.fromList [0, 0]
+                              }
+                  , odeJacobian = Nothing
+                  , odeInitCond = [1, 1]
+                  , odeSolTimes = VS.fromList [0..2]
+                  , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
+                  , odeEventHandler = time_ev_handler
+                  , odeTimeBasedEvents = time_ev_spec
+                  }
+
+    let
+      round' :: Double -> Integer -> Double
+      round' num sg = (fromIntegral @Int . round $ num * f) / f
+        where f = 10^sg
+    fromColumns (fmap (VS.map (\x -> round' x 2)) (
+      actualTimeGrid r :
+      toColumns (solutionMatrix r))
+     ) @?=  fromColumns [
+         VS.fromList [0.0, 0.0, 1.0, 2.0],
+         VS.fromList [1.0, -10.0, -9.0, -8.0],
+         VS.fromList [1.0, -10.0, -9.0, -8.0]
+        ]
   ,testCase "behaves properly on impossible constraint" $ do
     -- The system is x(0) = 0, dx/dt = 1, hence x is growing
     -- I do have an algebraic constraint, x + abs(y) = 0. Hence it can be

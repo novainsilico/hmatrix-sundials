@@ -360,7 +360,8 @@ solveC CConsts {..} CVars {..} log_env =
                               -- it would make sense to use "next_stop_time", however this will sometimes fail with
                               -- "tout1 too close to t0 to attempt initial condition calculation"
                               -- so we use "next_stop_time * 1.1" instead which is highly questionable but seems to work in practice...
-                              liftIO $ cIDACalcIC ida_mem IDA_YA_YDP_INIT (next_stop_time * 1.1) >>= check 5220
+                              -- We also special case if the next stop time is equal 0, we set something difference (because 0 * 1.1 is still 0)
+                              liftIO $ cIDACalcIC ida_mem IDA_YA_YDP_INIT (if next_stop_time /= 0 then next_stop_time * 1.1 else 1) >>= check 5220
 
                               -- Update the initial vector with meaningful values
                               -- Note: this is surprising that IDA does not seem to
