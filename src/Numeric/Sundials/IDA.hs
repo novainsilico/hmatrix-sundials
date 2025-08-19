@@ -349,6 +349,27 @@ solveC CConsts {..} CVars {..} log_env =
                                   pure (record_events, stop_solver)
                                 else pure (0, 0)
 
+                            when (n_events_triggered > 0 || time_based_event) $ do
+                              debug ("Re-initializing the system")
+                              liftIO $ cIDAReInit ida_mem t y yp >>= check 1576
+                              modify $ \s -> s {nb_reinit = nb_reinit s + 1}
+                              -- excerpt from the documentation:
+                              -- here the requested time is the first value for which a solution will be requested (from IDASolve()).
+                              -- This value is needed here only to determine the direction of integration and rough scale in the independent variable
+                              --
+                              -- it would make sense to use "next_stop_time", however this will sometimes fail with
+                              -- "tout1 too close to t0 to attempt initial condition calculation"
+                              -- so we use "next_stop_time * 1.1" instead which is highly questionable but seems to work in practice...
+                              liftIO $ cIDACalcIC ida_mem IDA_YA_YDP_INIT (next_stop_time * 1.1) >>= check 5220
+
+                              -- Update the initial vector with meaningful values
+                              -- Note: this is surprising that IDA does not seem to
+                              -- override by itself the y and yp values.
+                              --
+                              -- This is important to override 'y' here, because we
+                              -- store it in next block.
+                              liftIO $ cIDAGetConsistentIC ida_mem y yp >>= check 12345432
+
                             if record_events /= 0
                               then do
                                 debug ("Recording events")
@@ -393,20 +414,6 @@ solveC CConsts {..} CVars {..} log_env =
                               debug ("Stopping the hmatrix-sundials solver as requested")
                               s <- get
                               liftIO $ throwIO $ Finish s
-
-                            when (n_events_triggered > 0 || time_based_event) $ do
-                              debug ("Re-initializing the system")
-                              liftIO $ cIDAReInit ida_mem t y yp >>= check 1576
-                              modify $ \s -> s {nb_reinit = nb_reinit s + 1}
-                              -- excerpt from the documentation:
-                              -- here the requested time is the first value for which a solution will be requested (from IDASolve()).
-                              -- This value is needed here only to determine the direction of integration and rough scale in the independent variable
-                              --
-                              -- it would make sense to use "next_stop_time", however this will sometimes fail with
-                              -- "tout1 too close to t0 to attempt initial condition calculation"
-                              -- so we use "next_stop_time * 1.1" instead which is highly questionable but seems to work in practice...
-                              liftIO $ cIDACalcIC ida_mem IDA_YA_YDP_INIT (next_stop_time * 1.1) >>= check 5220
-
                           when (t == ti) $ do
                             modify $ \s -> s {input_ind = s.input_ind + 1}
                             s <- get
