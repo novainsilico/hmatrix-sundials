@@ -478,6 +478,149 @@ idaTests = testGroup "IDASolver" $ [
                   , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
                   }
     pure ()
+  ,testCase "discontiunous algebraic - not on timepoint" $ do
+    --
+    --
+    -- algebraic rule so
+    -- x = if t < 9.5 then 1 else 0
+    -- 0 = z - x
+    --
+    -- => 0 = z - if t < 9.5 then 1 else 0
+    Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
+                  { 
+                    odeFunctions = ResidualProblemFunctions ResidualFunctions {
+                              odeResidual = OdeResidualHaskell $ \t y _yp -> do
+                                let res = ([ y VS.! 0 - if t < 9.5 then 1 else 0 ])
+                                pure res
+                            , odeDifferentials = VS.fromList [0.0]
+                            , odeInitialDifferentials = VS.fromList [0]
+                              }
+                  , odeJacobian = Nothing
+                  , odeInitCond = [0]
+                  , odeSolTimes = VS.fromList [0..20]
+                  , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
+                  }
+
+    actualTimeGrid r @?= VS.fromList [0..20]
+    solutionMatrix r @?= fromColumns [
+       VS.fromList [ 1.0 -- 0
+                   , 1.0 -- 1
+                   , 1.0
+                   , 1.0
+                   , 1.0
+                   , 1.0 -- 5
+                   , 1.0
+                   , 1.0
+                   , 1.0
+                   , 1.0
+                   , 0.0 -- 10
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0 ]
+      ]
+  ,testCase "discontiunous algebraic - ON timepoint" $ do
+    --
+    --
+    -- algebraic rule so
+    -- x = if t < 10 then 1 else 0
+    -- 0 = z - x
+    --
+    -- => 0 = z - if t < 10 then 1 else 0
+    Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
+                  { 
+                    odeFunctions = ResidualProblemFunctions ResidualFunctions {
+                              odeResidual = OdeResidualHaskell $ \t y _yp -> do
+                                let res = ([ y VS.! 0 - if t < 10 then 1 else 0 ])
+                                pure res
+                            , odeDifferentials = VS.fromList [0.0]
+                            , odeInitialDifferentials = VS.fromList [0]
+                              }
+                  , odeJacobian = Nothing
+                  , odeInitCond = [0]
+                  , odeSolTimes = VS.fromList [0..20]
+                  , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
+                  }
+
+    actualTimeGrid r @?= VS.fromList [0..20]
+    solutionMatrix r @?= fromColumns [
+       VS.fromList [ 1.0 -- 0
+                   , 1.0 -- 1
+                   , 1.0
+                   , 1.0
+                   , 1.0
+                   , 1.0 -- 5
+                   , 1.0
+                   , 1.0
+                   , 1.0
+                   , 1.0
+                   , 0.0 -- 10
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0 ]
+      ]
+    
+  ,testCase "discontiunous algebraic - ON timepoint but after" $ do
+    --
+    --
+    -- algebraic rule so
+    -- x = if t <= 10 then 1 else 0
+    -- 0 = z - x
+    --
+    -- => 0 = z - if t < 10 then 1 else 0
+    Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
+                  { 
+                    odeFunctions = ResidualProblemFunctions ResidualFunctions {
+                              odeResidual = OdeResidualHaskell $ \t y _yp -> do
+                                let res = ([ y VS.! 0 - if t <= 10 then 1 else 0 ])
+                                pure res
+                            , odeDifferentials = VS.fromList [0.0]
+                            , odeInitialDifferentials = VS.fromList [0]
+                              }
+                  , odeJacobian = Nothing
+                  , odeInitCond = [0]
+                  , odeSolTimes = VS.fromList [0..20]
+                  , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
+                  }
+
+    actualTimeGrid r @?= VS.fromList [0..20]
+    solutionMatrix r @?= fromColumns [
+       VS.fromList [ 1.0 -- 0
+                   , 1.0 -- 1
+                   , 1.0
+                   , 1.0
+                   , 1.0
+                   , 1.0 -- 5
+                   , 1.0
+                   , 1.0
+                   , 1.0
+                   , 1.0
+                   , 1.0 -- 10 (this is correct! we have `x - 1 = 0` when t <= 10, so at `t=10`, `x` should be equal 1)
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0
+                   , 0.0 ]
+      ]
+    
   ,testCase "infinity in constraint" $ do
     -- The system is x(0) = 0, dx/dt = 1, hence x is growing
     -- I do have an algebraic constraint, x + ln(y) = 0

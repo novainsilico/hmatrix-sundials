@@ -215,6 +215,39 @@ solveC CConsts {..} CVars {..} log_env =
                           debug $ printf "Main loop iteration: t = %.17g, next time point (ti) = %.17g, next time event = %.17g" (coerce s.t_start :: Double) (coerce ti :: Double) (coerce next_time_event :: Double)
                           (t, flag) <- liftIO $ alloca $ \t_ptr -> do
                             flag <- cIDASolve ida_mem next_stop_time t_ptr y yp IDA_NORMAL
+
+                            -- IDA_ERR_FAIL may happen in case a discontinuity
+                            -- involving algebraic rules happen: The solver is lost and cannot fix the algebraic
+                            -- rule trivially
+                            flag <- if flag == IDA_ERR_FAIL
+                            then do
+                               currentT <- peek t_ptr
+                               -- We need to go past the discontinuity, so add
+                               -- a small offset to the current time
+                               --
+                               -- This is hackish, however it does not happen a lot.
+                               --
+                               -- We need to ensure that the new point is not
+                               -- AFTER the "next_stop_time" otherwise, future
+                               -- `IDASolve` will just try to go backward,
+                               -- leading to a solver failure. Hence the 'min'
+                               -- here.
+                               --
+                               -- This happen when the discontinuity happen at
+                               -- a stop time.
+                               let nextT = min (currentT + 0.0001) next_stop_time
+
+                               -- Reinitialise the solver, recompute initial condition (e.g. fix the algebraic value)
+                               liftIO $ cIDAReInit ida_mem nextT y yp >>= check 1576
+                               liftIO $ cIDACalcIC ida_mem IDA_YA_YDP_INIT (nextT * 1.1) >>= check 5220
+                               liftIO $ cIDAGetConsistentIC ida_mem y yp >>= check 12345432
+
+                               -- And restart the solver to go to the next solving time.
+                               flag' <- liftIO $ cIDASolve ida_mem next_stop_time t_ptr y yp IDA_NORMAL
+                               pure flag'
+                            else
+                              pure flag
+
                             if flag == IDA_ILL_INPUT
                               then do
                                 cIDAGetCurrentTime ida_mem t_ptr >>= check 123453
