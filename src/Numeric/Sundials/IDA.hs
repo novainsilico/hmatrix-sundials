@@ -216,12 +216,36 @@ solveC CConsts {..} CVars {..} log_env =
                           (t, flag) <- liftIO $ alloca $ \t_ptr -> do
                             flag <- cIDASolve ida_mem next_stop_time t_ptr y yp IDA_NORMAL
 
-                            -- IDA_ERR_FAIL may happen in case a discontinuity
-                            -- involving algebraic rules happen: The solver is lost and cannot fix the algebraic
-                            -- rule trivially
-                            flag <- if flag == IDA_ERR_FAIL
-                            then do
-                               currentT <- peek t_ptr
+                            -- The following error cases may happen in case a discontinuity
+                            -- involving algebraic rules.: The solver is lost and cannot fix the algebraic
+                            -- rule trivially, or will reduce to really small
+                            -- step before finally failing after too much
+                            -- steps.
+                            --
+                            -- According to sundial documentation, the problem
+                            -- should have a smooth support over all
+                            -- discontinuities, they even suggest to use a user
+                            -- flag to dynamically switch between different
+                            -- function.
+                            --
+                            -- This is not implemented yet in our work, so
+                            -- instead we use an arbitrary heuristic to try to
+                            -- jump over the discontinuity.
+                            --
+                            -- This is not a perfect solution, but it can solve
+                            -- without "too much" errors a few difficult
+                            -- problems.
+                            currentT <- peek t_ptr
+                            flag <- if
+                              flag == IDA_ERR_FAIL
+                              || flag == IDA_CONV_FAIL
+                              || flag == IDA_TOO_MUCH_WORK
+                              -- Sometime we find a root and do not advance.
+                              -- We'll just try to switch to the next step
+                              -- See next message with " pretending it didn't
+                              -- happen", it seems that this problem was
+                              -- already solved for CVode in some ways
+                              || (flag == IDA_ROOT_RETURN && currentT == s.t_start) then do
                                -- We need to go past the discontinuity, so add
                                -- a small offset to the current time
                                --
