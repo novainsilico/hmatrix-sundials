@@ -621,6 +621,37 @@ idaTests = testGroup "IDASolver" $ [
                    , 0.0 ]
       ]
     
+  ,testCase "discontiunous algebraic - when an ode depends on the algebraic" $ do
+    -- Here we have an ode which depends on the algebraic, and the algebraic contains a discontinuity.
+    -- This tricks the solver because it will observe a large change in the ode
+    -- and hence will try to reduce the step size until it is really close to
+    -- the discontiuinity and eventually fails.
+    --
+    -- We implemented a special case in the solver which detect such event and
+    -- "jump" over the discontinuity. This is imperfect, but allows the solving
+    -- of multiples discontinuous problems until we find a more robust
+    -- solution.
+    Right r <- runKatipT ?log_env $ solve (defaultOpts (IDAMethod IDADefault)) $ emptyOdeProblem
+                  { 
+                    odeFunctions = ResidualProblemFunctions ResidualFunctions {
+                              odeResidual = OdeResidualHaskell $ \t y yp -> do
+                                let res = ([ y VS.! 0 - if t <= 86000 then 0 else 100,
+                                             yp VS.! 1 - y VS.! 0,
+                                             yp VS.! 2 - 1])
+                                pure res
+                            , odeDifferentials = VS.fromList [0.0, 1.0, 1.0]
+                            , odeInitialDifferentials = VS.fromList [0, 0, 0]
+                              }
+                  , odeJacobian = Nothing
+                  , odeInitCond = [0, 0, 0]
+                  , odeSolTimes = VS.fromList [0, 3600..2 * 86000]
+                  , odeTolerances = defaultTolerances { absTolerances = Left 1e-12 }
+                  }
+
+    actualTimeGrid r @?= VS.fromList [0, 3600..2 * 86000]
+    (toColumns $ solutionMatrix r) !! 1 @?= 
+       VS.fromList [0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,39999.98999999983,399999.9900000005,759999.99,1119999.99,1479999.9900000007,1839999.9900000007,2199999.9900000007,2559999.990000002,2919999.9900000016,3279999.9900000016,3639999.9900000016,3999999.9900000016,4359999.990000002,4719999.990000001,5079999.99,5439999.99,5799999.99,6159999.99,6519999.99,6879999.99,7239999.990000001,7599999.990000001,7959999.990000001,8319999.990000001,8679999.99]
+
   ,testCase "infinity in constraint" $ do
     -- The system is x(0) = 0, dx/dt = 1, hence x is growing
     -- I do have an algebraic constraint, x + ln(y) = 0

@@ -80,6 +80,8 @@ module Numeric.Sundials.Foreign
   , pattern IDA_Y_INIT
   , pattern IDA_YA_YDP_INIT
   , pattern IDA_ERR_FAIL
+  , pattern IDA_CONV_FAIL
+  , pattern IDA_TOO_MUCH_WORK
 
   , getContentPtr, getData
   ) where
@@ -400,3 +402,5 @@ pattern IDA_ILL_INPUT = #const IDA_ILL_INPUT
 pattern IDA_Y_INIT = #const IDA_Y_INIT
 pattern IDA_YA_YDP_INIT = #const IDA_YA_YDP_INIT
 pattern IDA_ERR_FAIL = #const IDA_ERR_FAIL
+pattern IDA_CONV_FAIL = #const IDA_CONV_FAIL
+pattern IDA_TOO_MUCH_WORK = #const IDA_TOO_MUCH_WORK
