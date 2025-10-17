@@ -232,7 +232,7 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
     c_n_event_specs = fromIntegral $ V.length odeEventDirections
     c_requested_event_direction = V.convert $ V.map directionToInt odeEventDirections
     -- TODO: this is not called from sundial, so the "C" wrapping is not mandatory
-    c_apply_event n_events event_indices_ptr t y_ptr y'_ptr yp_ptr stop_solver_ptr record_event_ptr = do
+    c_apply_event n_events event_indices_ptr t y_ptr y'_ptr yp_ptr stop_solver_ptr record_event_ptr callback = do
       event_indices <- vecFromPtr event_indices_ptr (fromIntegral n_events)
       y_vec <- peek y_ptr
       yp_vec <- if yp_ptr == nullPtr then pure $ error "using yp for event in a solver not meant for"
@@ -247,6 +247,7 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
             (VS.unsafeCoerceVector $ sunVecVals y_vec :: VS.Vector Double)
             yp_vec
             (VS.map fromIntegral event_indices :: VS.Vector Int)
+            (\y -> VS.unsafeCoerceVector <$> (callback $ VS.unsafeCoerceVector y))
         poke y'_ptr $ SunVector
           { sunVecN = sunVecN y_vec
           , sunVecVals = VS.unsafeCoerceVector eventNewState

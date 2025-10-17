@@ -368,7 +368,7 @@ solveC CConsts {..} CVars {..} log_env =
                                   (stop_solver, record_events, err) <- liftIO $ alloca $ \stop_solver_ptr -> alloca $ \record_event_ptr -> do
                                     --       /* Update the state with the supplied function */
                                     err <- VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
-                                      err <- c_apply_event (fromIntegral n_events_triggered) c_root_info_ptr t (coerce y) (coerce y) nullPtr stop_solver_ptr record_event_ptr
+                                      err <- c_apply_event (fromIntegral n_events_triggered) c_root_info_ptr t (coerce y) (coerce y) nullPtr stop_solver_ptr record_event_ptr (\x -> pure x)
                                       pure err
                                     stop_solver <- peek stop_solver_ptr
                                     record_event <- peek record_event_ptr

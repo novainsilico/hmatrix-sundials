@@ -106,7 +106,6 @@ data CConsts = CConsts
   -- ^ Root solving for ode problem
   , c_event_fn_ida :: FunPtr IDARootFn
   -- ^ Root solving for ida problem
-
   , c_apply_event
       :: CInt -- number of triggered events
       -> Ptr CInt -- event indices
@@ -116,7 +115,12 @@ data CConsts = CConsts
       -> Ptr T.SunVector -- yp
       -> Ptr CInt -- (out) stop the solver?
       -> Ptr CInt -- (out) record the event?
+      -- | After applying one event, if there are multiples event to apply
+      -- (e.g. cascade), you *must* call this calback with the current system
+      -- state in order to get an updated system state after solving algebraic constraints
+      -> (VS.Vector CDouble -> IO (VS.Vector CDouble))
       -> IO CInt
+  -- ^ The function called by the solver to apply event
   , c_jac_set :: CInt
   , c_jac :: FunPtr OdeJacobianCType
   -- ^ Jacobian for ode problem
@@ -332,6 +336,10 @@ type EventHandler
   -> VS.Vector Int
     -- ^ Vector of triggered event indices.
     -- If the vector is empty, this is a time-based event.
+  -> (VS.Vector Double -> IO (VS.Vector Double))
+  -- ^ A callback function that the handle can call after handling an event
+  -- Depending on the solver, the event handling may have impact on the solver
+  -- values and the event handler may want to see updated values
   -> IO EventHandlerResult
 
 -- | This callback will be called when a timepoint is saved

@@ -392,7 +392,36 @@ solveC CConsts {..} CVars {..} log_env =
                                   (stop_solver, record_events, err) <- liftIO $ alloca $ \stop_solver_ptr -> alloca $ \record_event_ptr -> do
                                     --       /* Update the state with the supplied function */
                                     err <- VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
-                                      err <- c_apply_event (fromIntegral n_events_triggered) c_root_info_ptr t (coerce y) (coerce y) (coerce yp) stop_solver_ptr record_event_ptr
+                                      let 
+                                        -- this is called by the event updater
+                                        -- in order to update the state and
+                                        -- ensures algebraic constraints are
+                                        -- still valid after an event
+                                        --
+                                        -- The event handler could use this in
+                                        -- order to maybe trigger cascade of
+                                        -- events.
+                                        updateOnEvent new_y = do
+                                          -- Copy the "y" from the event handler to the current "y"
+                                          VS.imapM_ (\i v -> cNV_Ith_S y i v) new_y
+
+                                          liftIO $ cIDAReInit ida_mem t y yp >>= check 1576
+                                          -- excerpt from the documentation:
+                                          -- here the requested time is the first value for which a solution will be requested (from IDASolve()).
+                                          -- This value is needed here only to determine the direction of integration and rough scale in the independent variable
+                                          --
+                                          -- it would make sense to use "next_stop_time", however this will sometimes fail with
+                                          -- "tout1 too close to t0 to attempt initial condition calculation"
+                                          -- so we use "next_stop_time * 1.1" instead which is highly questionable but seems to work in practice...
+                                          -- We also special case if the next stop time is equal 0, we set something difference (because 0 * 1.1 is still 0)
+                                          liftIO $ cIDACalcIC ida_mem IDA_YA_YDP_INIT (if next_stop_time /= 0 then next_stop_time * 1.1 else 1) >>= check 5220
+
+                                          -- Update the initial vector with meaningful values
+                                          liftIO $ cIDAGetConsistentIC ida_mem y yp >>= check 12345432
+
+                                          -- Returns it to the caller
+                                          VS.generateM (fromIntegral c_dim) (\i -> cNV_Ith_S' y i)
+                                      err <- c_apply_event (fromIntegral n_events_triggered) c_root_info_ptr t (coerce y) (coerce y) (coerce yp) stop_solver_ptr record_event_ptr updateOnEvent
                                       pure err
                                     stop_solver <- peek stop_solver_ptr
                                     record_event <- peek record_event_ptr
@@ -407,6 +436,14 @@ solveC CConsts {..} CVars {..} log_env =
                                 else pure (0, 0)
 
                             when (n_events_triggered > 0 || time_based_event) $ do
+                              -- NOTE: in theory everything was done in "updateOnEvent"
+                              -- Maybe that's legacy code and could be removed,
+                              -- but the semantic here is unclear and the only
+                              -- risk of rerunning this is a small performance
+                              -- impact.
+                              --
+                              -- So let's keep that here for now, we'll clean
+                              -- that later (hopefully ;)
                               debug ("Re-initializing the system")
                               liftIO $ cIDAReInit ida_mem t y yp >>= check 1576
                               modify $ \s -> s {nb_reinit = nb_reinit s + 1}
