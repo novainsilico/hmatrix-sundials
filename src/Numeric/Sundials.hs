@@ -407,7 +407,7 @@ withCConsts ODEOpts{..} OdeProblem{..} = runContT $ do
           return (nullFunPtr, funidaptr, userdataptr, VS.unsafeCoerceVector odeDifferentials, VS.unsafeCoerceVector odeInitialDifferentials)
   let c_ontimepoint = do
         case odeOnTimePoint of
-          Nothing -> \_idx _ -> pure ()
+          Nothing -> \_t _y _idx _diags -> pure ()
           Just fun -> fun
   (c_jac, c_jac_ida) <-
     case odeJacobian of

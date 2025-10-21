@@ -349,7 +349,11 @@ type EventHandler
 -- because the main loop is in haskell, so it can just stream the timepoint
 -- directly.
 type TimePointHandler
-  =  CInt -- ^ timepoint index
+  = CDouble
+  -- ^ Current time
+  -> VSM.MVector VSM.RealWorld CDouble
+  -- ^ values of the variable
+  ->  CInt -- ^ timepoint index
   -> IO SundialsDiagnostics
   -- ^ Get the different diagnostics
   -> IO ()
