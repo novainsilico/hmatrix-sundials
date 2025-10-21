@@ -81,7 +81,8 @@ solveC CConsts {..} CVars {..} log_env =
                         -- \*/
                         t_start = t0,
                         nb_reinit = 0,
-                        max_events_reached = False
+                        max_events_reached = False,
+                        current_diagnostics = mempty
                       }
                   )
 
@@ -372,7 +373,15 @@ solveC CConsts {..} CVars {..} log_env =
 
                             when (n_events_triggered > 0 || time_based_event) $ do
                               debug ("Re-initializing the system")
+
+                              -- Before reinit, we get the diagnostics and update the current diagnostics
+                              state <- get
+                              diagnostics <- liftIO $ getDiagnostics cvode_mem state
+                              put $ state { current_diagnostics = diagnostics }
+
+                              -- This reset the diagnostics stored in cvode_mem
                               liftIO $ cCVodeReInit cvode_mem t y
+
                               modify $ \s -> s { nb_reinit = nb_reinit s + 1 }
 
                           when (t == ti) $ do
@@ -427,7 +436,8 @@ getDiagnostics cvode_mem loopState = do
              (max_events_reached loopState)
              (fromIntegral gevals)
              (nb_reinit loopState)
-      pure diagnostics
+
+      pure $ diagnostics <> current_diagnostics loopState
 
 --  |]
 

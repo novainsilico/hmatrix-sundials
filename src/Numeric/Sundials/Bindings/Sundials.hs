@@ -237,7 +237,9 @@ data LoopState = LoopState
     -- Count the number of reinit of the solver
     nb_reinit :: {-# UNPACK #-} !Int,
     -- | Did we reached the maximum number of event
-    max_events_reached :: {-# UNPACK #-} !Bool
+    max_events_reached :: {-# UNPACK #-} !Bool,
+    -- | The current accumulated diagnostics before previous reinit
+    current_diagnostics :: !SundialsDiagnostics
   }
   deriving (Show)
 
