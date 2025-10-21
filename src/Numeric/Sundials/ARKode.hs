@@ -129,7 +129,8 @@ solveC CConsts {..} CVars {..} log_env =
                         -- \*/
                         t_start = t0,
                         nb_reinit = 0,
-                        max_events_reached = False
+                        max_events_reached = False,
+                        current_diagnostics = mempty
                       }
                   )
 
@@ -429,6 +430,12 @@ solveC CConsts {..} CVars {..} log_env =
 
                             when (n_events_triggered > 0 || time_based_event) $ do
                               debug ("Re-initializing the system")
+
+                              -- Before reinit, we get the diagnostics and update the current diagnostics
+                              state <- get
+                              diagnostics <- liftIO $ getDiagnosticsCallback state
+                              put $ state { current_diagnostics = diagnostics }
+
                               if not implicit
                                 then do
                                   liftIO $ cARKStepReInit cvode_mem c_rhs nullFunPtr t y >>= check 1576
@@ -503,7 +510,7 @@ getDiagnostics cvode_mem c_method c_n_event_specs loopState = do
              (nb_reinit loopState)
 
 
-      pure diagnostics
+      pure $ diagnostics <> current_diagnostics loopState
 
 --  |]
 

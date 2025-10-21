@@ -33,6 +33,9 @@ import Numeric.Sundials.Bindings.Sundials
 import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
 import Text.Printf (printf)
+import Data.IORef (newIORef)
+import GHC.IORef (readIORef)
+import Data.IORef (writeIORef)
 
 -- | Available methods for IDA
 data IDAMethod = IDADefault
@@ -79,7 +82,8 @@ solveC CConsts {..} CVars {..} log_env =
                         -- \*/
                         t_start = t0,
                         nb_reinit = 0,
-                        max_events_reached = False
+                        max_events_reached = False,
+                        current_diagnostics = mempty
                       }
                   )
 
@@ -213,8 +217,11 @@ solveC CConsts {..} CVars {..} log_env =
 
                           let next_stop_time = min ti next_time_event
                           debug $ printf "Main loop iteration: t = %.17g, next time point (ti) = %.17g, next time event = %.17g" (coerce s.t_start :: Double) (coerce ti :: Double) (coerce next_time_event :: Double)
-                          (t, flag) <- liftIO $ alloca $ \t_ptr -> do
-                            flag <- cIDASolve ida_mem next_stop_time t_ptr y yp IDA_NORMAL
+                          (t, flag) <- do
+                            (flag, currentT) <- liftIO $ alloca $ \t_ptr -> do
+                              flag <- cIDASolve ida_mem next_stop_time t_ptr y yp IDA_NORMAL
+                              currentT <- peek t_ptr
+                              pure (flag, currentT)
 
                             -- The following error cases may happen in case a discontinuity
                             -- involving algebraic rules.: The solver is lost and cannot fix the algebraic
@@ -235,8 +242,7 @@ solveC CConsts {..} CVars {..} log_env =
                             -- This is not a perfect solution, but it can solve
                             -- without "too much" errors a few difficult
                             -- problems.
-                            currentT <- peek t_ptr
-                            flag <- if
+                            (flag, currentT) <- if
                               flag == IDA_ERR_FAIL
                               || flag == IDA_CONV_FAIL
                               || flag == IDA_TOO_MUCH_WORK
@@ -262,20 +268,27 @@ solveC CConsts {..} CVars {..} log_env =
                                let nextT = min (currentT + 0.0001) next_stop_time
 
                                -- Reinitialise the solver, recompute initial condition (e.g. fix the algebraic value)
-                               liftIO $ cIDAReInit ida_mem nextT y yp >>= check 1576
+                               idaReInit ida_mem nextT y yp
+
                                liftIO $ cIDACalcIC ida_mem IDA_YA_YDP_INIT (nextT * 1.1) >>= check 5220
                                liftIO $ cIDAGetConsistentIC ida_mem y yp >>= check 12345432
 
                                -- And restart the solver to go to the next solving time.
-                               flag' <- liftIO $ cIDASolve ida_mem next_stop_time t_ptr y yp IDA_NORMAL
-                               pure flag'
+                               (flag', currentT) <- liftIO $ alloca $ \t_ptr -> do
+                                 flag <- cIDASolve ida_mem next_stop_time t_ptr y yp IDA_NORMAL
+                                 t <- peek t_ptr
+                                 pure (flag, t)
+                                 
+                               pure (flag', currentT)
                             else
-                              pure flag
+                              pure (flag, currentT)
 
                             if flag == IDA_ILL_INPUT
                               then do
-                                cIDAGetCurrentTime ida_mem t_ptr >>= check 123453
-                                t <- peek t_ptr
+                                t <- liftIO $ alloca $ \t_ptr -> do
+                                  cIDAGetCurrentTime ida_mem t_ptr >>= check 123453
+                                  t <- peek t_ptr
+                                  pure t
                                 if t == next_stop_time
                                   then -- This is an emulation of CV_TOO_CLOSE
                                   -- Which IDA do not support. We just catch the
@@ -284,8 +297,7 @@ solveC CConsts {..} CVars {..} log_env =
                                     pure (t, CV_TOO_CLOSE)
                                   else pure (t, IDA_ILL_INPUT)
                               else do
-                                t <- peek t_ptr
-                                pure (t, flag)
+                                pure (currentT, flag)
 
                           debug $ printf "IDASolve returned %d; now t = %.17g\n" (fromIntegral flag :: Int) (coerce t :: Double)
                           let root_based_event = flag == IDA_ROOT_RETURN
@@ -389,6 +401,10 @@ solveC CConsts {..} CVars {..} log_env =
                               if (n_events_triggered > 0 || time_based_event)
                                 then do
                                   debug $ printf "Calling the event handler; n_events_triggered = %d; time_based_event = %d" n_events_triggered (bool (0 :: Int) 1 time_based_event)
+
+                                  -- we'll use a small mailbox in order to store the state for the callback
+                                  state <- get
+                                  ref <- liftIO $ newIORef state
                                   (stop_solver, record_events, err) <- liftIO $ alloca $ \stop_solver_ptr -> alloca $ \record_event_ptr -> do
                                     --       /* Update the state with the supplied function */
                                     err <- VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
@@ -405,7 +421,9 @@ solveC CConsts {..} CVars {..} log_env =
                                           -- Copy the "y" from the event handler to the current "y"
                                           VS.imapM_ (\i v -> cNV_Ith_S y i v) new_y
 
-                                          liftIO $ cIDAReInit ida_mem t y yp >>= check 1576
+                                          state <- readIORef ref
+                                          state' <- execStateT (idaReInit ida_mem t y yp) state
+                                          writeIORef ref state'
                                           -- excerpt from the documentation:
                                           -- here the requested time is the first value for which a solution will be requested (from IDASolve()).
                                           -- This value is needed here only to determine the direction of integration and rough scale in the independent variable
@@ -421,12 +439,15 @@ solveC CConsts {..} CVars {..} log_env =
 
                                           -- Returns it to the caller
                                           VS.generateM (fromIntegral c_dim) (\i -> cNV_Ith_S' y i)
+
                                       err <- c_apply_event (fromIntegral n_events_triggered) c_root_info_ptr t (coerce y) (coerce y) (coerce yp) stop_solver_ptr record_event_ptr updateOnEvent
                                       pure err
                                     stop_solver <- peek stop_solver_ptr
                                     record_event <- peek record_event_ptr
                                     pure (stop_solver, record_event, err)
 
+                                  state' <- liftIO $ readIORef ref
+                                  put state'
                                   --       // If the event handled failed internally, we stop the solving
                                   when (err /= 0) $ do
                                     s <- get
@@ -445,8 +466,7 @@ solveC CConsts {..} CVars {..} log_env =
                               -- So let's keep that here for now, we'll clean
                               -- that later (hopefully ;)
                               debug ("Re-initializing the system")
-                              liftIO $ cIDAReInit ida_mem t y yp >>= check 1576
-                              modify $ \s -> s {nb_reinit = nb_reinit s + 1}
+                              idaReInit ida_mem t y yp
                               -- excerpt from the documentation:
                               -- here the requested time is the first value for which a solution will be requested (from IDASolve()).
                               -- This value is needed here only to determine the direction of integration and rough scale in the independent variable
@@ -564,7 +584,8 @@ getDiagnostics cvode_mem loopState = do
           (loopState.max_events_reached)
           (fromIntegral gevals)
           (nb_reinit loopState)
-  pure diagnostics
+
+  pure $ diagnostics <> current_diagnostics loopState
 
 --  |]
 
@@ -665,6 +686,18 @@ foreign import ccall "IDAReInit"
     N_Vector ->
     N_Vector ->
     IO CInt
+
+idaReInit :: IDAMem -> CDouble -> N_Vector -> N_Vector -> StateT LoopState IO ()
+idaReInit ida_mem t y yp = do
+  -- Before reinit, we get the diagnostics and update the current diagnostics
+  state <- get
+  diagnostics <- liftIO $ getDiagnostics ida_mem state
+  put $ state { current_diagnostics = diagnostics }
+
+  -- This reset the diagnostics stored in cvode_mem
+  liftIO $ cIDAReInit ida_mem t y yp >>= check 1576
+
+  modify $ \s -> s { nb_reinit = nb_reinit s + 1 }
 
 foreign import ccall "IDAGetRootInfo" cIDAGetRootInfo :: IDAMem -> Ptr CInt -> IO CInt
 
