@@ -232,7 +232,7 @@ solveC CConsts {..} CVars {..} log_env =
                               go (j + 1)
                     go 0
 
-                    c_ontimepoint t0 c_output_mat (fromIntegral init_loop.output_ind) (getDiagnosticsCallback init_loop)
+                    c_ontimepoint t0 c_output_mat 0 (getDiagnosticsCallback init_loop)
 
                     if implicit
                       then do
