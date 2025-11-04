@@ -433,11 +433,16 @@ getDiagnostics cvode_mem loopState = do
              (fromIntegral $ ncfn)
              (fromIntegral $ nje)
              (fromIntegral $ nfeLS)
-             (max_events_reached loopState)
+             False
              (fromIntegral gevals)
-             (nb_reinit loopState)
+             0
 
-      pure $ diagnostics <> current_diagnostics loopState
+      -- Some stats are not accumulated.
+      pure $ (diagnostics <> current_diagnostics loopState)
+            {
+                 odeMaxEventsReached = loopState.max_events_reached,
+                 odeNumReinit = loopState.nb_reinit
+            }
 
 --  |]
 
