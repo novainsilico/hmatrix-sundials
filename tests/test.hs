@@ -196,7 +196,7 @@ mkEventHandler
   -> V.Vector Bool -- ^ stop the solver?
   -> V.Vector Bool -- ^ record the event?
   -> EventHandler
-mkEventHandler handlers stop_solver_vec record_event_vec t y0 _yp evs callback
+mkEventHandler handlers stop_solver_vec record_event_vec t y0 _yp evs _callback
   | VS.null evs = error "mkEventHandler: got a time-based event"
   | otherwise = return EventHandlerResult
       { eventStopSolver = or . map (stop_solver_vec V.!) $ VS.toList evs
@@ -210,7 +210,7 @@ mkTimeEvents
 mkTimeEvents time_based_events = do
   time_based_events_ref <- newIORef time_based_events
   let handler :: EventHandler
-      handler t y0 _yp evs callback =
+      handler t y0 _yp evs _callback =
         if VS.null evs
           then do
             time_evs <- readIORef time_based_events_ref
