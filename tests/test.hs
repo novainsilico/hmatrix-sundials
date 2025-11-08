@@ -196,13 +196,16 @@ mkEventHandler
   -> V.Vector Bool -- ^ stop the solver?
   -> V.Vector Bool -- ^ record the event?
   -> EventHandler
-mkEventHandler handlers stop_solver_vec record_event_vec t y0 _yp evs _callback
+mkEventHandler handlers stop_solver_vec record_event_vec t y0 _yp evs callback
   | VS.null evs = error "mkEventHandler: got a time-based event"
-  | otherwise = return EventHandlerResult
-      { eventStopSolver = or . map (stop_solver_vec V.!) $ VS.toList evs
-      , eventRecord = or . map (record_event_vec V.!) $ VS.toList evs
-      , eventNewState = foldl' (\y hndl -> hndl t y) y0 . map (handlers V.!) $ VS.toList evs
-      }
+  | otherwise = do
+      let newState = foldl' (\y hndl -> hndl t y) y0 . map (handlers V.!) $ VS.toList evs
+      newState' <- callback newState
+      pure $ EventHandlerResult
+        { eventStopSolver = or . map (stop_solver_vec V.!) $ VS.toList evs
+        , eventRecord = or . map (record_event_vec V.!) $ VS.toList evs
+        , eventNewState = newState'
+        }
 
 mkTimeEvents
   :: [(Double, Double -> VS.Vector Double -> VS.Vector Double, Bool, Bool)] -- ^ time-based events (time, update, stop?, record?)
@@ -210,7 +213,7 @@ mkTimeEvents
 mkTimeEvents time_based_events = do
   time_based_events_ref <- newIORef time_based_events
   let handler :: EventHandler
-      handler t y0 _yp evs _callback =
+      handler t y0 _yp evs callback =
         if VS.null evs
           then do
             time_evs <- readIORef time_based_events_ref
@@ -220,10 +223,12 @@ mkTimeEvents time_based_events = do
                 if t == t1
                   then do
                     writeIORef time_based_events_ref rest
+                    let newState = update t y0
+                    newState' <- callback newState
                     return EventHandlerResult
                       { eventStopSolver
                       , eventRecord
-                      , eventNewState = update t y0
+                      , eventNewState = newState'
                       }
                   else throwIO $ ErrorCall "Wrong event time"
           else error "mkTimeEvents: got root-based events"

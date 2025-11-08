@@ -417,6 +417,11 @@ solveC CConsts {..} CVars {..} log_env =
                                         -- The event handler could use this in
                                         -- order to maybe trigger cascade of
                                         -- events.
+                                        --
+                                        -- This is the responsability of the
+                                        -- event updater to call this if it
+                                        -- changes a value which may invalidate
+                                        -- the algebraic equations.
                                         updateOnEvent new_y = do
                                           -- Copy the "y" from the event handler to the current "y"
                                           VS.imapM_ (\i v -> cNV_Ith_S y i v) new_y
@@ -456,34 +461,12 @@ solveC CConsts {..} CVars {..} log_env =
                                   pure (record_events, stop_solver)
                                 else pure (0, 0)
 
+                            -- After event, we need to reinit the solver to
+                            -- smaller timesteps in order to ensure we do not
+                            -- miss any discontinuity.
                             when (n_events_triggered > 0 || time_based_event) $ do
-                              -- NOTE: in theory everything was done in "updateOnEvent"
-                              -- Maybe that's legacy code and could be removed,
-                              -- but the semantic here is unclear and the only
-                              -- risk of rerunning this is a small performance
-                              -- impact.
-                              --
-                              -- So let's keep that here for now, we'll clean
-                              -- that later (hopefully ;)
                               debug ("Re-initializing the system")
                               idaReInit ida_mem t y yp
-                              -- excerpt from the documentation:
-                              -- here the requested time is the first value for which a solution will be requested (from IDASolve()).
-                              -- This value is needed here only to determine the direction of integration and rough scale in the independent variable
-                              --
-                              -- it would make sense to use "next_stop_time", however this will sometimes fail with
-                              -- "tout1 too close to t0 to attempt initial condition calculation"
-                              -- so we use "next_stop_time * 1.1" instead which is highly questionable but seems to work in practice...
-                              -- We also special case if the next stop time is equal 0, we set something difference (because 0 * 1.1 is still 0)
-                              liftIO $ cIDACalcIC ida_mem IDA_YA_YDP_INIT (if next_stop_time /= 0 then next_stop_time * 1.1 else 1) >>= check 5220
-
-                              -- Update the initial vector with meaningful values
-                              -- Note: this is surprising that IDA does not seem to
-                              -- override by itself the y and yp values.
-                              --
-                              -- This is important to override 'y' here, because we
-                              -- store it in next block.
-                              liftIO $ cIDAGetConsistentIC ida_mem y yp >>= check 12345432
 
                             if record_events /= 0
                               then do
