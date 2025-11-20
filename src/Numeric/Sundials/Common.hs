@@ -339,7 +339,10 @@ type EventHandler
   -> (VS.Vector Double -> IO (VS.Vector Double))
   -- ^ A callback function that the handle can call after handling an event
   -- Depending on the solver, the event handling may have impact on the solver
-  -- values and the event handler may want to see updated values
+  -- values and the event handler may want to see updated values.
+  -- This is the responsability of the event handler to call this callback if
+  -- it had done changes into the state variable which should be taken into
+  -- account before next event.
   -> IO EventHandlerResult
 
 -- | This callback will be called when a timepoint is saved
