@@ -362,26 +362,27 @@ solveC CConsts {..} CVars {..} log_env =
                                                   go (i + 1) n_events_triggered
                                     go 0 0
 
-                            (record_events, stop_solver) <-
+                            (record_events, stop_solver, do_reinit) <-
                               if (n_events_triggered > 0 || time_based_event)
                                 then do
                                   debug $ printf "Calling the event handler; n_events_triggered = %d; time_based_event = %d" n_events_triggered (bool (0 :: Int) 1 time_based_event)
-                                  (stop_solver, record_events, err) <- liftIO $ alloca $ \stop_solver_ptr -> alloca $ \record_event_ptr -> do
+                                  (stop_solver, record_events, err, do_reinit) <- liftIO $ alloca $ \stop_solver_ptr -> alloca $ \record_event_ptr -> alloca $ \do_reinit_ptr -> do
                                     --       /* Update the state with the supplied function */
                                     err <- VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
-                                      err <- c_apply_event (fromIntegral n_events_triggered) c_root_info_ptr t (coerce y) (coerce y) nullPtr stop_solver_ptr record_event_ptr (\x -> pure x)
+                                      err <- c_apply_event (fromIntegral n_events_triggered) c_root_info_ptr t (coerce y) (coerce y) nullPtr stop_solver_ptr record_event_ptr do_reinit_ptr (\x -> pure x)
                                       pure err
                                     stop_solver <- peek stop_solver_ptr
                                     record_event <- peek record_event_ptr
-                                    pure (stop_solver, record_event, err)
+                                    do_reinit <- peek do_reinit_ptr
+                                    pure (stop_solver, record_event, err, do_reinit)
 
                                   --       // If the event handled failed internally, we stop the solving
                                   when (err /= 0) $ do
                                     s <- get
                                     liftIO $ throwIO $ Break s
 
-                                  pure (record_events, stop_solver)
-                                else pure (0, 0)
+                                  pure (record_events, stop_solver, do_reinit)
+                                else pure (0, 0, 0)
 
                             if record_events /= 0
                               then do
@@ -428,7 +429,7 @@ solveC CConsts {..} CVars {..} log_env =
                               s <- get
                               liftIO $ throwIO $ Finish s
 
-                            when (n_events_triggered > 0 || time_based_event) $ do
+                            when (do_reinit > 0) $ do
                               debug ("Re-initializing the system")
 
                               -- Before reinit, we get the diagnostics and update the current diagnostics

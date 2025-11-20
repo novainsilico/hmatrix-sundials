@@ -205,6 +205,7 @@ mkEventHandler handlers stop_solver_vec record_event_vec t y0 _yp evs callback
         { eventStopSolver = or . map (stop_solver_vec V.!) $ VS.toList evs
         , eventRecord = or . map (record_event_vec V.!) $ VS.toList evs
         , eventNewState = newState'
+        , eventDoReinit = True
         }
 
 mkTimeEvents
@@ -229,6 +230,7 @@ mkTimeEvents time_based_events = do
                       { eventStopSolver
                       , eventRecord
                       , eventNewState = newState'
+                      , eventDoReinit = True
                       }
                   else throwIO $ ErrorCall "Wrong event time"
           else error "mkTimeEvents: got root-based events"

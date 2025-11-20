@@ -115,6 +115,7 @@ data CConsts = CConsts
       -> Ptr T.SunVector -- yp
       -> Ptr CInt -- (out) stop the solver?
       -> Ptr CInt -- (out) record the event?
+      -> Ptr CInt -- (out) should we reinit the solver?
       -- | After applying one event, if there are multiples event to apply
       -- (e.g. cascade), you *must* call this calback with the current system
       -- state in order to get an updated system state after solving algebraic constraints
@@ -327,6 +328,13 @@ data EventHandlerResult = EventHandlerResult
     -- solution?
   , eventNewState :: !(VS.Vector Double)
     -- ^ the new state after the event has been applied
+  , eventDoReinit :: !Bool
+  -- ^ Should the solver must be reinitialised after this event
+  -- It should if the event was triggered to handle a discontinuity, or if the event introduced any value (e.g. a discontinuity).
+  -- But it is possible that the handler is called for nothing (time based
+  -- event with complex condition, ...) or that the handler decides that the
+  -- change is relevant for the solver accuracy (for example, if the changed
+  -- value is NOT used in the ode system for example, and only for statistics
   }
 
 type EventHandler
