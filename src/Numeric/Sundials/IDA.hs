@@ -397,7 +397,7 @@ solveC CConsts {..} CVars {..} log_env =
                                                   go (i + 1) n_events_triggered
                                     go 0 0
 
-                            (record_events, stop_solver) <-
+                            (record_events, stop_solver, do_reinit) <-
                               if (n_events_triggered > 0 || time_based_event)
                                 then do
                                   debug $ printf "Calling the event handler; n_events_triggered = %d; time_based_event = %d" n_events_triggered (bool (0 :: Int) 1 time_based_event)
@@ -405,7 +405,7 @@ solveC CConsts {..} CVars {..} log_env =
                                   -- we'll use a small mailbox in order to store the state for the callback
                                   state <- get
                                   ref <- liftIO $ newIORef state
-                                  (stop_solver, record_events, err) <- liftIO $ alloca $ \stop_solver_ptr -> alloca $ \record_event_ptr -> do
+                                  (stop_solver, record_events, err, do_reinit) <- liftIO $ alloca $ \stop_solver_ptr -> alloca $ \record_event_ptr -> alloca $ \do_reinit_ptr -> do
                                     --       /* Update the state with the supplied function */
                                     err <- VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
                                       let 
@@ -445,11 +445,12 @@ solveC CConsts {..} CVars {..} log_env =
                                           -- Returns it to the caller
                                           VS.generateM (fromIntegral c_dim) (\i -> cNV_Ith_S' y i)
 
-                                      err <- c_apply_event (fromIntegral n_events_triggered) c_root_info_ptr t (coerce y) (coerce y) (coerce yp) stop_solver_ptr record_event_ptr updateOnEvent
+                                      err <- c_apply_event (fromIntegral n_events_triggered) c_root_info_ptr t (coerce y) (coerce y) (coerce yp) stop_solver_ptr record_event_ptr do_reinit_ptr updateOnEvent
                                       pure err
                                     stop_solver <- peek stop_solver_ptr
                                     record_event <- peek record_event_ptr
-                                    pure (stop_solver, record_event, err)
+                                    do_reinit <- peek do_reinit_ptr
+                                    pure (stop_solver, record_event, err, do_reinit)
 
                                   state' <- liftIO $ readIORef ref
                                   put state'
@@ -458,13 +459,14 @@ solveC CConsts {..} CVars {..} log_env =
                                     s <- get
                                     liftIO $ throwIO $ Break s
 
-                                  pure (record_events, stop_solver)
-                                else pure (0, 0)
+                                  pure (record_events, stop_solver, do_reinit)
+                                else pure (0, 0, 0)
 
                             -- After event, we need to reinit the solver to
                             -- smaller timesteps in order to ensure we do not
                             -- miss any discontinuity.
-                            when (n_events_triggered > 0 || time_based_event) $ do
+                            -- TODO: maybe it is incorrect, we have to ensure that IDACalcIC had been called correctly
+                            when (do_reinit > 0) $ do
                               debug ("Re-initializing the system")
                               idaReInit ida_mem t y yp
 
