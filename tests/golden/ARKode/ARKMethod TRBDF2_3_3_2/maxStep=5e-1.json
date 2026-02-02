@@ -14,16 +14,16 @@
             10
         ],
         "diagnostics": {
-            "dlsGetNumJacEvals": 1,
-            "dlsGetNumRhsEvals": 1,
-            "odeGetNumErrTestFails": 29,
-            "odeGetNumLinSolvSetups": 54,
+            "dlsGetNumJacEvals": 2,
+            "dlsGetNumRhsEvals": 2,
+            "odeGetNumErrTestFails": 32,
+            "odeGetNumLinSolvSetups": 56,
             "odeGetNumNonlinSolvConvFails": 0,
-            "odeGetNumNonlinSolvIters": 279,
+            "odeGetNumNonlinSolvIters": 303,
             "odeGetNumRhsEvals_fe": 0,
-            "odeGetNumRhsEvals_fi": 454,
-            "odeGetNumStepAttempts": 87,
-            "odeGetNumSteps": 58,
+            "odeGetNumRhsEvals_fi": 488,
+            "odeGetNumStepAttempts": 92,
+            "odeGetNumSteps": 60,
             "odeMaxEventsReached": false,
             "odeNumReinit": 0,
             "odeNumRootEvals": 0
@@ -45,22 +45,22 @@
                 0
             ],
             [
-                8.855049487618227e-16
+                1.3643295390994045e-15
             ],
             [
-                0.9999971672222521
+                0.9999973534748477
             ],
             [
-                0.9999976263123411
+                0.9999995320746428
             ],
             [
-                0.9999976263123411
+                0.9999995320746428
             ],
             [
-                0.9999976263123411
+                0.9999995320746428
             ],
             [
-                0.9999976263123411
+                0.9999995320746428
             ]
         ]
     }

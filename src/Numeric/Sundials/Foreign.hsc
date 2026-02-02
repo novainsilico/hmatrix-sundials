@@ -82,6 +82,7 @@ module Numeric.Sundials.Foreign
   , pattern IDA_ERR_FAIL
   , pattern IDA_CONV_FAIL
   , pattern IDA_TOO_MUCH_WORK
+  , pattern IDA_TOO_CLOSE
 
   , getContentPtr, getData
   ) where
@@ -394,7 +395,7 @@ pattern ARK_SUCCESS = #const ARK_SUCCESS
 pattern ARK_ROOT_RETURN = #const ARK_ROOT_RETURN
 pattern ARK_TOO_CLOSE = #const ARK_TOO_CLOSE
 
-pattern IDA_NORMAL, IDA_SUCCESS, IDA_ROOT_RETURN, IDA_ILL_INPUT, IDA_Y_INIT, IDA_YA_YDP_INIT :: CInt
+pattern IDA_NORMAL, IDA_SUCCESS, IDA_ROOT_RETURN, IDA_ILL_INPUT, IDA_Y_INIT, IDA_YA_YDP_INIT, IDA_TOO_CLOSE :: CInt
 pattern IDA_NORMAL = #const IDA_NORMAL
 pattern IDA_SUCCESS = #const IDA_SUCCESS
 pattern IDA_ROOT_RETURN = #const IDA_ROOT_RETURN
@@ -404,3 +405,4 @@ pattern IDA_YA_YDP_INIT = #const IDA_YA_YDP_INIT
 pattern IDA_ERR_FAIL = #const IDA_ERR_FAIL
 pattern IDA_CONV_FAIL = #const IDA_CONV_FAIL
 pattern IDA_TOO_MUCH_WORK = #const IDA_TOO_MUCH_WORK
+pattern IDA_TOO_CLOSE = #const IDA_TOO_CLOSE

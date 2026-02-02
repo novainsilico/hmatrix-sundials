@@ -5,26 +5,26 @@
             10
         ],
         "diagnostics": {
-            "dlsGetNumJacEvals": 2,
-            "dlsGetNumRhsEvals": 2,
-            "odeGetNumErrTestFails": 0,
-            "odeGetNumLinSolvSetups": 0,
+            "dlsGetNumJacEvals": 19,
+            "dlsGetNumRhsEvals": 19,
+            "odeGetNumErrTestFails": 70,
+            "odeGetNumLinSolvSetups": 131,
             "odeGetNumNonlinSolvConvFails": 0,
-            "odeGetNumNonlinSolvIters": 120,
+            "odeGetNumNonlinSolvIters": 2030,
             "odeGetNumRhsEvals_fe": 0,
-            "odeGetNumRhsEvals_fi": 0,
-            "odeGetNumStepAttempts": 0,
-            "odeGetNumSteps": 0,
+            "odeGetNumRhsEvals_fi": 2740,
+            "odeGetNumStepAttempts": 182,
+            "odeGetNumSteps": 112,
             "odeMaxEventsReached": false,
             "odeNumReinit": 10,
-            "odeNumRootEvals": 10
+            "odeNumRootEvals": 184
         },
         "solutionMatrix": [
             [
                 0
             ],
             [
-                4.846593694979538
+                4.902720000000199
             ]
         ]
     }

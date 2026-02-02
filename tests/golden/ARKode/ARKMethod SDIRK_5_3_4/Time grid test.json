@@ -11,13 +11,13 @@
             "dlsGetNumJacEvals": 1,
             "dlsGetNumRhsEvals": 1,
             "odeGetNumErrTestFails": 0,
-            "odeGetNumLinSolvSetups": 9,
+            "odeGetNumLinSolvSetups": 7,
             "odeGetNumNonlinSolvConvFails": 0,
-            "odeGetNumNonlinSolvIters": 81,
+            "odeGetNumNonlinSolvIters": 65,
             "odeGetNumRhsEvals_fe": 0,
-            "odeGetNumRhsEvals_fi": 129,
-            "odeGetNumStepAttempts": 9,
-            "odeGetNumSteps": 9,
+            "odeGetNumRhsEvals_fi": 103,
+            "odeGetNumStepAttempts": 7,
+            "odeGetNumSteps": 7,
             "odeMaxEventsReached": false,
             "odeNumReinit": 0,
             "odeNumRootEvals": 0
@@ -27,16 +27,16 @@
                 0
             ],
             [
-                1.0000000000000002
+                0.9999999999999988
             ],
             [
-                3.0000000000000044
+                2.9999999999999987
             ],
             [
-                13.000000000000004
+                13.00000000000001
             ],
             [
-                102.99999999999993
+                103.00000000000013
             ]
         ]
     }

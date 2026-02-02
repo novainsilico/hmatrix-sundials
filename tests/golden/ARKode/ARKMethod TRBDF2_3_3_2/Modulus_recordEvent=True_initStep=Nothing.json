@@ -24,83 +24,83 @@
             10
         ],
         "diagnostics": {
-            "dlsGetNumJacEvals": 1,
-            "dlsGetNumRhsEvals": 1,
-            "odeGetNumErrTestFails": 0,
-            "odeGetNumLinSolvSetups": 0,
+            "dlsGetNumJacEvals": 10,
+            "dlsGetNumRhsEvals": 10,
+            "odeGetNumErrTestFails": 205,
+            "odeGetNumLinSolvSetups": 297,
             "odeGetNumNonlinSolvConvFails": 0,
-            "odeGetNumNonlinSolvIters": 265,
+            "odeGetNumNonlinSolvIters": 1821,
             "odeGetNumRhsEvals_fe": 0,
-            "odeGetNumRhsEvals_fi": 0,
-            "odeGetNumStepAttempts": 0,
-            "odeGetNumSteps": 0,
+            "odeGetNumRhsEvals_fi": 2498,
+            "odeGetNumStepAttempts": 415,
+            "odeGetNumSteps": 210,
             "odeMaxEventsReached": false,
             "odeNumReinit": 10,
-            "odeNumRootEvals": 38
+            "odeNumRootEvals": 263
         },
         "solutionMatrix": [
             [
                 0
             ],
             [
-                0.49999897378103
+                0.49999969219406215
             ],
             [
-                0.49999897378103
+                0.49999969219406215
             ],
             [
-                0.9999981841615198
+                0.9999984315310091
             ],
             [
-                0.9999981841615198
+                0.9999984315310091
             ],
             [
-                1.4999977074374795
+                1.4999980938750246
             ],
             [
-                1.4999977074374795
+                1.4999980938750246
             ],
             [
-                1.9999962994048597
+                1.9999977370297217
             ],
             [
-                1.9999962994048597
+                1.9999977370297217
             ],
             [
-                2.4999955550336734
+                2.4999970176191537
             ],
             [
-                2.4999955550336734
+                2.4999970176191537
             ],
             [
-                2.9999939824075392
+                2.999996400303225
             ],
             [
-                2.9999939824075392
+                2.999996400303225
             ],
             [
-                3.499992961515818
+                3.4999954566712406
             ],
             [
-                3.499992961515818
+                3.4999954566712406
             ],
             [
-                3.9999921118842225
+                3.9999948809662356
             ],
             [
-                3.9999921118842225
+                3.9999948809662356
             ],
             [
-                4.499991361933145
+                4.4999944407848815
             ],
             [
-                4.499991361933145
+                4.4999944407848815
             ],
             [
-                4.999990561885426
+                4.999993797415371
             ],
             [
-                4.999990561885426
+                4.999993797415371
             ]
         ]
     }
