@@ -14,10 +14,10 @@
             "odeGetNumLinSolvSetups": 0,
             "odeGetNumNonlinSolvConvFails": 0,
             "odeGetNumNonlinSolvIters": 0,
-            "odeGetNumRhsEvals_fe": 67,
+            "odeGetNumRhsEvals_fe": 49,
             "odeGetNumRhsEvals_fi": 0,
-            "odeGetNumStepAttempts": 10,
-            "odeGetNumSteps": 10,
+            "odeGetNumStepAttempts": 7,
+            "odeGetNumSteps": 7,
             "odeMaxEventsReached": false,
             "odeNumReinit": 0,
             "odeNumRootEvals": 0
@@ -27,16 +27,16 @@
                 0
             ],
             [
-                0.9999999999999996
+                0.9999999999999915
             ],
             [
-                3.000000000000003
+                2.999999999999996
             ],
             [
-                13.000000000000007
+                12.999999999999998
             ],
             [
-                103.00000000000009
+                102.99999999999996
             ]
         ]
     }

@@ -74,7 +74,7 @@ solveC CConsts {..} CVars {..} log_env =
                         event_ind = 0,
                         -- /* t_start tracks the starting point of the integration in order to detect
                         --    empty integration interval and avoid a potential infinite loop;
-                        --    see Note [CV_TOO_CLOSE]. Unlike T0, t_start is updated every time we
+                        --    see Note [IDA_TOO_CLOSE]. Unlike T0, t_start is updated every time we
                         --    restart the solving after handling (or not) an event, or emitting
                         --    a requested time point.
                         --    Why not just look for the last recorded time in c_output_mat? Because
@@ -217,10 +217,16 @@ solveC CConsts {..} CVars {..} log_env =
 
                           let next_stop_time = min ti next_time_event
                           debug $ printf "Main loop iteration: t = %.17g, next time point (ti) = %.17g, next time event = %.17g" (coerce s.t_start :: Double) (coerce ti :: Double) (coerce next_time_event :: Double)
-                          (t, flag) <- do
+                          (flag, t) <- do
                             (flag, currentT) <- liftIO $ alloca $ \t_ptr -> do
                               flag <- cIDASolve ida_mem next_stop_time t_ptr y yp IDA_NORMAL
-                              currentT <- peek t_ptr
+
+                              -- When IDA_TOO_CLOSE, the solver do not make any progress
+                              -- and does not update t_ptr
+                              -- See https://github.com/llnl/sundials/issues/840
+                              currentT <- if flag == IDA_TOO_CLOSE
+                                          then pure s.t_start
+                                          else peek t_ptr
                               pure (flag, currentT)
 
                             -- The following error cases may happen in case a discontinuity
@@ -242,7 +248,7 @@ solveC CConsts {..} CVars {..} log_env =
                             -- This is not a perfect solution, but it can solve
                             -- without "too much" errors a few difficult
                             -- problems.
-                            (flag, currentT) <- if
+                            if
                               flag == IDA_ERR_FAIL
                               || flag == IDA_CONV_FAIL
                               || flag == IDA_TOO_MUCH_WORK
@@ -283,48 +289,30 @@ solveC CConsts {..} CVars {..} log_env =
                             else
                               pure (flag, currentT)
 
-                            if flag == IDA_ILL_INPUT
-                              then do
-                                t <- liftIO $ alloca $ \t_ptr -> do
-                                  cIDAGetCurrentTime ida_mem t_ptr >>= check 123453
-                                  t <- peek t_ptr
-                                  pure t
-                                if t == next_stop_time
-                                  then -- This is an emulation of CV_TOO_CLOSE
-                                  -- Which IDA do not support. We just catch the
-                                  -- IDA_ILL_INPUT as well as comparing the t and
-                                  -- hope for the best.
-                                    pure (t, CV_TOO_CLOSE)
-                                  else pure (t, IDA_ILL_INPUT)
-                              else do
-                                pure (currentT, flag)
-
                           debug $ printf "IDASolve returned %d; now t = %.17g\n" (fromIntegral flag :: Int) (coerce t :: Double)
                           let root_based_event = flag == IDA_ROOT_RETURN
                           let time_based_event = t == next_time_event
-                          -- TODO: CV_TOO_CLOSE does not exists with IDA
-                          -- However, we have many uses cases where no solving was required
                           (t, _flag) <-
-                            if flag == CV_TOO_CLOSE && not time_based_event
+                            if flag == IDA_TOO_CLOSE && not time_based_event
                               then do
-                                --     /* See Note [CV_TOO_CLOSE]
+                                --     /* See Note [IDA_TOO_CLOSE]
                                 --        No solving was required; just set the time t manually and continue
                                 --        as if solving succeeded. */
-                                debug $ printf "Got CV_TOO_CLOSE; no solving was required; proceeding to t = %.17g" (coerce next_stop_time :: Double)
+                                debug $ printf "Got IDA_TOO_CLOSE; no solving was required; proceeding to t = %.17g" (coerce next_stop_time :: Double)
                                 pure (next_stop_time, flag)
                               else do
                                 s <- get
                                 if t == next_stop_time && t == s.t_start && flag == IDA_ROOT_RETURN && not time_based_event
                                   then do
-                                    --     /* See Note [CV_TOO_CLOSE]
+                                    --     /* See Note [IDA_TOO_CLOSE]
                                     --        Probably the initial step size was set, and that's why we didn't
-                                    --        get CV_TOO_CLOSE.
+                                    --        get IDA_TOO_CLOSE.
                                     --        Pretend that the root didn't happen, lest we keep handling it
                                     --        forever. */
                                     debug $ ("Got a root but t == t_start == next_stop_time; pretending it didn't happen" :: String)
                                     pure (t, IDA_SUCCESS)
                                   else do
-                                    if not (flag == CV_TOO_CLOSE && time_based_event) && flag < 0
+                                    if not (flag == IDA_TOO_CLOSE && time_based_event) && flag < 0
                                       then do
                                         liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \ele -> do
                                           liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \weights -> do
@@ -578,7 +566,7 @@ getDiagnostics cvode_mem loopState = do
             }
 --  |]
 
-{- Note [CV_TOO_CLOSE]
+{- Note [IDA_TOO_CLOSE]
    ~~~~~~~~~~~~~~~~~~~
    One edge condition that may occur is that an event time may exactly
    coincide with a solving time (e.g. they are both exactly equal to an
@@ -589,19 +577,19 @@ getDiagnostics cvode_mem loopState = do
    * We restart Sundials with the tout being equal to the next solving time,
      which also happens to be equal t1.
    * Sundials sees that the start and end solving times are equal, and
-     returns the CV_TOO_CLOSE error.
+     returns the IDA_TOO_CLOSE error.
 
    Calculating on our side when the start and end times are "too close" by
    Sundials standards is a bit complicated (see the code at the beginning
    of the cvHin function). It's much easier just to call Sundials and
    handle the error.
 
-   For that, however, we need to make sure we ignore CV_TOO_CLOSE in our
+   For that, however, we need to make sure we ignore IDA_TOO_CLOSE in our
    error handler so as not to confuse the end users with mysterious error
    messages in the logs.
 
-   That said, we can't always rely on CV_TOO_CLOSE. When the initial step
-   size is set, cvHin is not called, and CV_TOO_CLOSE is not triggered.
+   That said, we can't always rely on IDA_TOO_CLOSE. When the initial step
+   size is set, cvHin is not called, and IDA_TOO_CLOSE is not triggered.
    Therefore we also add an explicit check to avoid an infinite loop of
    integrating over an empty interval.
 

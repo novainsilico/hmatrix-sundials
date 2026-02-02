@@ -1,107 +1,17 @@
 {
-    "Right": {
-        "actualTimeGrid": [
-            0,
-            1.0000000000000153,
-            1.0000000000000153,
-            2,
-            2,
-            3,
-            3,
-            4,
-            4,
-            5,
-            5,
-            6,
-            6,
-            7,
-            7,
-            8,
-            8,
-            9,
-            9,
-            10,
-            10
+    "Left": {
+        "errorCode": -3,
+        "errorEstimates": [
+            2.6516399750771e-6
         ],
-        "diagnostics": {
-            "dlsGetNumJacEvals": 2,
-            "dlsGetNumRhsEvals": 2,
-            "odeGetNumErrTestFails": 0,
-            "odeGetNumLinSolvSetups": 0,
-            "odeGetNumNonlinSolvConvFails": 0,
-            "odeGetNumNonlinSolvIters": 140,
-            "odeGetNumRhsEvals_fe": 0,
-            "odeGetNumRhsEvals_fi": 0,
-            "odeGetNumStepAttempts": 0,
-            "odeGetNumSteps": 0,
-            "odeMaxEventsReached": false,
-            "odeNumReinit": 10,
-            "odeNumRootEvals": 21
-        },
-        "solutionMatrix": [
+        "partialResults": [
             [
+                0,
                 0
-            ],
-            [
-                0.5000000000000052
-            ],
-            [
-                0.5000000000000052
-            ],
-            [
-                0.999999286946992
-            ],
-            [
-                0.999999286946992
-            ],
-            [
-                1.499998577665063
-            ],
-            [
-                1.499998577665063
-            ],
-            [
-                1.9999978721541019
-            ],
-            [
-                1.9999978721541019
-            ],
-            [
-                2.499997170413989
-            ],
-            [
-                2.499997170413989
-            ],
-            [
-                2.999996472444604
-            ],
-            [
-                2.999996472444604
-            ],
-            [
-                3.499995778245828
-            ],
-            [
-                3.499995778245828
-            ],
-            [
-                3.9999950878175383
-            ],
-            [
-                3.9999950878175383
-            ],
-            [
-                4.499994401159615
-            ],
-            [
-                4.499994401159615
-            ],
-            [
-                4.999992893951253
-            ],
-            [
-                4.999992893951253
             ]
+        ],
+        "varWeights": [
+            999950.0024998751
         ]
     }
 }

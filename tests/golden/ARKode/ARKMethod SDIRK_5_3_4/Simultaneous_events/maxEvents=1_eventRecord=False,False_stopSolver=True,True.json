@@ -7,16 +7,16 @@
             "dlsGetNumJacEvals": 1,
             "dlsGetNumRhsEvals": 2,
             "odeGetNumErrTestFails": 0,
-            "odeGetNumLinSolvSetups": 4,
+            "odeGetNumLinSolvSetups": 3,
             "odeGetNumNonlinSolvConvFails": 0,
-            "odeGetNumNonlinSolvIters": 20,
+            "odeGetNumNonlinSolvIters": 15,
             "odeGetNumRhsEvals_fe": 0,
-            "odeGetNumRhsEvals_fi": 43,
-            "odeGetNumStepAttempts": 4,
-            "odeGetNumSteps": 4,
+            "odeGetNumRhsEvals_fi": 33,
+            "odeGetNumStepAttempts": 3,
+            "odeGetNumSteps": 3,
             "odeMaxEventsReached": false,
             "odeNumReinit": 0,
-            "odeNumRootEvals": 6
+            "odeNumRootEvals": 5
         },
         "solutionMatrix": [
             [
