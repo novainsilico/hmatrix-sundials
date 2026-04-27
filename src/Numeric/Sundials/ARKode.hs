@@ -19,7 +19,9 @@ import Control.Exception
 import Control.Monad (when)
 import Control.Monad.State
 import Data.Bool
+import Data.Coerce (coerce)
 import Data.Maybe (fromMaybe)
+import Data.Vector.Mutable (RealWorld)
 import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Storable.Mutable as VSM
 import Data.Void
@@ -32,8 +34,7 @@ import Numeric.Sundials.Bindings.Sundials
 import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
 import Text.Printf (printf)
-import Data.Vector.Mutable (RealWorld)
-import Data.Coerce (coerce)
+
 -- | Available methods for ARKode
 data ARKMethod
   = SDIRK_2_1_2
@@ -421,7 +422,7 @@ solveC CConsts {..} CVars {..} log_env =
                               if (fromIntegral s.event_ind >= c_max_events)
                                 then do
                                   debug ("Reached max_events; returning")
-                                  modify $ \s -> s {max_events_reached = True }
+                                  modify $ \s -> s {max_events_reached = True}
                                   pure 1
                                 else pure stop_solver
                             when (stop_solver /= 0) $ do
@@ -435,14 +436,14 @@ solveC CConsts {..} CVars {..} log_env =
                               -- Before reinit, we get the diagnostics and update the current diagnostics
                               state <- get
                               diagnostics <- liftIO $ getDiagnosticsCallback state
-                              put $ state { current_diagnostics = diagnostics }
+                              put $ state {current_diagnostics = diagnostics}
 
                               if not implicit
                                 then do
                                   liftIO $ cARKStepReInit cvode_mem c_rhs nullFunPtr t y >>= check 1576
                                 else do
                                   liftIO $ cARKStepReInit cvode_mem nullFunPtr c_rhs t y >>= check 1576
-                              modify $ \s -> s { nb_reinit = nb_reinit s + 1 }
+                              modify $ \s -> s {nb_reinit = nb_reinit s + 1}
 
                           when (t == ti) $ do
                             modify $ \s -> s {input_ind = s.input_ind + 1}
@@ -457,66 +458,68 @@ solveC CConsts {..} CVars {..} log_env =
 
 getDiagnostics :: ARKodeMem -> CInt -> CInt -> LoopState -> IO SundialsDiagnostics
 getDiagnostics cvode_mem c_method c_n_event_specs loopState = do
-      -- /* Get some final statistics on how the solve progressed */
-      nst <- cvGet cARKodeGetNumSteps cvode_mem
+  -- /* Get some final statistics on how the solve progressed */
+  nst <- cvGet cARKodeGetNumSteps cvode_mem
 
-      nst_a <- cvGet cARKodeGetNumStepAttempts cvode_mem
+  nst_a <- cvGet cARKodeGetNumStepAttempts cvode_mem
 
-      (nfe, nfi) <- alloca $ \nfe -> do
-        alloca $ \nfi -> do
-          errCode <- cARKStepGetNumRhsEvals cvode_mem nfe nfi
-          when (errCode /= ARK_SUCCESS) $ do
-            error $ "Failure during nfe/nfi get"
+  (nfe, nfi) <- alloca $ \nfe -> do
+    alloca $ \nfi -> do
+      errCode <- cARKStepGetNumRhsEvals cvode_mem nfe nfi
+      when (errCode /= ARK_SUCCESS) $ do
+        error $ "Failure during nfe/nfi get"
 
-          (,) <$> peek nfe <*> peek nfi
+      (,) <$> peek nfe <*> peek nfi
 
-      nsetups <- cvGet cARKodeGetNumLinSolvSetups cvode_mem
+  nsetups <- cvGet cARKodeGetNumLinSolvSetups cvode_mem
 
-      netf <- cvGet cARKodeGetNumErrTestFails cvode_mem
+  netf <- cvGet cARKodeGetNumErrTestFails cvode_mem
 
-      nni <- cvGet cARKodeGetNumNonlinSolvIters cvode_mem
+  nni <- cvGet cARKodeGetNumNonlinSolvIters cvode_mem
 
-      let implicit = c_method >= ARKODE_MIN_DIRK_NUM
-      (ncfn, nje, nfeLS) <- if implicit
-        then do
-          ncfn <- cvGet cARKodeGetNumNonlinSolvConvFails cvode_mem
+  let implicit = c_method >= ARKODE_MIN_DIRK_NUM
+  (ncfn, nje, nfeLS) <-
+    if implicit
+      then do
+        ncfn <- cvGet cARKodeGetNumNonlinSolvConvFails cvode_mem
 
-          nje <- cvGet cARKodeGetNumJacEvals cvode_mem
+        nje <- cvGet cARKodeGetNumJacEvals cvode_mem
 
-          nfeLS <- cvGet cARKodeGetNumLinRhsEvals cvode_mem
+        nfeLS <- cvGet cARKodeGetNumLinRhsEvals cvode_mem
 
-          pure (ncfn, nje, nfeLS)
-        else do
-          pure (0, 0, 0)
+        pure (ncfn, nje, nfeLS)
+      else do
+        pure (0, 0, 0)
 
-      -- It is surprising but this command fails with ARKode only when no root
-      -- are set
-      gevals <- if c_n_event_specs /= 0
-                then cvGet cARKodeGetNumGEvals cvode_mem
-                else pure 0
+  -- It is surprising but this command fails with ARKode only when no root
+  -- are set
+  gevals <-
+    if c_n_event_specs /= 0
+      then cvGet cARKodeGetNumGEvals cvode_mem
+      else pure 0
 
-      let diagnostics = SundialsDiagnostics
-             (fromIntegral $ nst)
-             (fromIntegral $ nst_a)
-             (fromIntegral $ nfe)
-             (fromIntegral $ nfi)
-             (fromIntegral $ nsetups)
-             (fromIntegral $ netf)
-             (fromIntegral $ nni)
-             (fromIntegral $ ncfn)
-             (fromIntegral $ nje)
-             (fromIntegral $ nfeLS)
-             False
-             (fromIntegral gevals)
-             0
+  let diagnostics =
+        SundialsDiagnostics
+          (fromIntegral $ nst)
+          (fromIntegral $ nst_a)
+          (fromIntegral $ nfe)
+          (fromIntegral $ nfi)
+          (fromIntegral $ nsetups)
+          (fromIntegral $ netf)
+          (fromIntegral $ nni)
+          (fromIntegral $ ncfn)
+          (fromIntegral $ nje)
+          (fromIntegral $ nfeLS)
+          False
+          (fromIntegral gevals)
+          0
 
-
-      -- Some stats are not accumulated.
-      pure $ (diagnostics <> current_diagnostics loopState)
-            {
-                 odeMaxEventsReached = loopState.max_events_reached,
-                 odeNumReinit = loopState.nb_reinit
-            }
+  -- Some stats are not accumulated.
+  pure $
+    (diagnostics <> current_diagnostics loopState)
+      { odeMaxEventsReached = loopState.max_events_reached,
+        odeNumReinit = loopState.nb_reinit
+      }
 
 --  |]
 
@@ -649,7 +652,6 @@ foreign import ccall "ARKodeGetNumLinRhsEvals" cARKodeGetNumLinRhsEvals :: ARKod
 foreign import ccall "ARKodeGetNumStepAttempts" cARKodeGetNumStepAttempts :: ARKodeMem -> Ptr CLong -> IO CInt
 
 foreign import ccall "ARKodeGetNumGEvals" cARKodeGetNumGEvals :: ARKodeMem -> Ptr CLong -> IO CInt
-
 
 cvGet :: (HasCallStack) => (Storable b) => (ARKodeMem -> Ptr b -> IO CInt) -> ARKodeMem -> IO b
 cvGet getter cvode_mem = do

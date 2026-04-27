@@ -1,58 +1,59 @@
--- | Common infrastructure for CVode/ARKode
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
+
+-- | Common infrastructure for CVode/ARKode
 module Numeric.Sundials.Common where
 
-import Foreign.C.Types
-import Foreign.Ptr
-import Foreign.C.String
-import Numeric.Sundials.Foreign as T
+import Control.DeepSeq
+import Control.Monad.Reader
+import Data.Aeson
+import qualified Data.ByteString as BS
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Storable.Mutable as VSM
-import Numeric.LinearAlgebra.HMatrix as H hiding (Vector)
-import Control.DeepSeq
-import Katip
-import Data.Aeson
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
-import qualified Data.ByteString as BS
-import Control.Monad.Reader
-import GHC.Generics (Generic)
+import Foreign.C.String
+import Foreign.C.Types
 import Foreign.ForeignPtr
+import Foreign.Ptr
+import GHC.Generics (Generic)
+import Katip
+import Numeric.LinearAlgebra.HMatrix as H hiding (Vector)
+import Numeric.Sundials.Foreign as T
 
 -- | A collection of variables that we allocate on the Haskell side and
 -- pass into the C code to be filled.
 data CVars vec = CVars
-  { c_root_info :: vec CInt
-    -- ^ Just a temporary vector (of the size equal to the number of event
+  { -- | Just a temporary vector (of the size equal to the number of event
     -- specs) that we use to get root info. Isn't used for output.
-  , c_event_index :: vec CInt
-    -- ^ For each event occurrence, this indicates which of the events
+    c_root_info :: vec CInt,
+    -- | For each event occurrence, this indicates which of the events
     -- occurred. Size: max_num_events.
-  , c_event_time :: vec CDouble
-    -- ^ For each event occurrence, this indicates the time of the
+    c_event_index :: vec CInt,
+    -- | For each event occurrence, this indicates the time of the
     -- occurrence. Size: max_num_events.
-  , c_n_rows :: vec CInt
-    -- ^ The total number of rows in the output matrix.
-  , c_output_mat :: vec CDouble
-    -- ^ The output matrix stored in the row-major order.
+    c_event_time :: vec CDouble,
+    -- | The total number of rows in the output matrix.
+    c_n_rows :: vec CInt,
+    -- | The output matrix stored in the row-major order.
     -- Dimensions: (1 + dim) * (2 * max_events + nTs).
-  , c_actual_event_direction :: vec CInt
-    -- ^ Vector of size max_num_events that gives the direction of the
+    c_output_mat :: vec CDouble,
+    -- | Vector of size max_num_events that gives the direction of the
     -- occurred event.
-  , c_local_error :: vec CDouble
-    -- ^ Vector containing local error estimates. Size: the dimensionality
+    c_actual_event_direction :: vec CInt,
+    -- | Vector containing local error estimates. Size: the dimensionality
     -- of the system.
-  , c_var_weight :: vec CDouble
-    -- ^ Vector containing variable weights (derived from the tolerances).
+    c_local_error :: vec CDouble,
+    -- | Vector containing variable weights (derived from the tolerances).
     -- Size: the dimensionality of the system.
-  , c_local_error_set :: vec CInt
+    c_var_weight :: vec CDouble,
+    c_local_error_set :: vec CInt
     -- The flag (size 1) indicating whether c_local_error is filled with meaningful
     -- values. *Should be initialized with 0.*
   }
 
 allocateCVars :: OdeProblem -> IO (CVars (VS.MVector VSM.RealWorld))
-allocateCVars OdeProblem{..} = do
+allocateCVars OdeProblem {..} = do
   let dim = VS.length odeInitCond
   c_root_info <- VSM.new $ V.length odeEventDirections
   c_event_index <- VSM.new odeMaxEvents
@@ -63,13 +64,14 @@ allocateCVars OdeProblem{..} = do
   c_var_weight <- VSM.new dim
   c_local_error_set <- VSM.new 1
   VSM.write c_local_error_set 0 0
-  c_output_mat <- VSM.new $
-    (1 + dim) * (2 * odeMaxEvents + VS.length odeSolTimes)
+  c_output_mat <-
+    VSM.new $
+      (1 + dim) * (2 * odeMaxEvents + VS.length odeSolTimes)
   return CVars {..}
 
 -- NB: the mutable CVars must not be used after this
 freezeCVars :: CVars (VS.MVector VSM.RealWorld) -> IO (CVars VS.Vector)
-freezeCVars CVars{..} = do
+freezeCVars CVars {..} = do
   c_root_info <- VS.unsafeFreeze c_root_info
   c_event_index <- VS.unsafeFreeze c_event_index
   c_event_time <- VS.unsafeFreeze c_event_time
@@ -84,67 +86,67 @@ freezeCVars CVars{..} = do
 -- | Similar to 'CVars', except these are immutable values that are
 -- accessed (read-only) by the C code and specify the system to be solved.
 data CConsts = CConsts
-  { c_dim :: SunIndexType -- ^ the dimensionality (number of variables/equations)
-  , c_method :: CInt -- ^ the ODE method (specific to the solver)
-  , c_n_sol_times :: CInt
-  , c_sol_time :: VS.Vector CDouble
-  , c_init_cond :: VS.Vector CDouble
-  , c_is_differential :: VS.Vector CDouble
-  -- ^ For IDA: tells if a value is driven by a differential (==1.0) or algebraic (==0.0)
-  , c_init_differentials :: VS.Vector CDouble
-  -- ^ For IDA: initial value for the differentials. That's a "best guess"
-  , c_rhs :: FunPtr OdeRhsCType
-  -- ^ For ode solving, ode RHS function
-  , c_ida_res :: FunPtr IDAResFn
-  -- ^ For IDA: residual function
-
-  , c_rhs_userdata :: Ptr UserData
-  , c_rtol :: CDouble
-  , c_atol :: VS.Vector CDouble
-  , c_n_event_specs :: CInt
-  , c_event_fn :: FunPtr EventConditionCType
-  -- ^ Root solving for ode problem
-  , c_event_fn_ida :: FunPtr IDARootFn
-  -- ^ Root solving for ida problem
-  , c_apply_event
-      :: CInt -- number of triggered events
-      -> Ptr CInt -- event indices
-      -> CDouble -- time
-      -> Ptr T.SunVector -- y
-      -> Ptr T.SunVector -- new y
-      -> Ptr T.SunVector -- yp
-      -> Ptr CInt -- (out) stop the solver?
-      -> Ptr CInt -- (out) record the event?
-      -> Ptr CInt -- (out) should we reinit the solver?
-      -- | After applying one event, if there are multiples event to apply
+  { -- | the dimensionality (number of variables/equations)
+    c_dim :: SunIndexType,
+    -- | the ODE method (specific to the solver)
+    c_method :: CInt,
+    c_n_sol_times :: CInt,
+    c_sol_time :: VS.Vector CDouble,
+    c_init_cond :: VS.Vector CDouble,
+    -- | For IDA: tells if a value is driven by a differential (==1.0) or algebraic (==0.0)
+    c_is_differential :: VS.Vector CDouble,
+    -- | For IDA: initial value for the differentials. That's a "best guess"
+    c_init_differentials :: VS.Vector CDouble,
+    -- | For ode solving, ode RHS function
+    c_rhs :: FunPtr OdeRhsCType,
+    -- | For IDA: residual function
+    c_ida_res :: FunPtr IDAResFn,
+    c_rhs_userdata :: Ptr UserData,
+    c_rtol :: CDouble,
+    c_atol :: VS.Vector CDouble,
+    c_n_event_specs :: CInt,
+    -- | Root solving for ode problem
+    c_event_fn :: FunPtr EventConditionCType,
+    -- | Root solving for ida problem
+    c_event_fn_ida :: FunPtr IDARootFn,
+    -- | The function called by the solver to apply event
+    c_apply_event ::
+      CInt -> -- number of triggered events
+      Ptr CInt -> -- event indices
+      CDouble -> -- time
+      Ptr T.SunVector -> -- y
+      Ptr T.SunVector -> -- new y
+      Ptr T.SunVector -> -- yp
+      Ptr CInt -> -- (out) stop the solver?
+      Ptr CInt -> -- (out) record the event?
+      Ptr CInt -> -- (out) should we reinit the solver?
+      -- \| After applying one event, if there are multiples event to apply
       -- (e.g. cascade), you *must* call this calback with the current system
       -- state in order to get an updated system state after solving algebraic constraints
-      -> (VS.Vector CDouble -> IO (VS.Vector CDouble))
-      -> IO CInt
-  -- ^ The function called by the solver to apply event
-  , c_jac_set :: CInt
-  , c_jac :: FunPtr OdeJacobianCType
-  -- ^ Jacobian for ode problem
-  , c_jac_ida :: FunPtr IDALsJacFn
-  -- ^ Jacobian for IDA problem
-
-  , c_sparse_jac :: CInt
-      -- ^ If 0, use a dense matrix.
-      -- If non-0, use a sparse matrix with that number of non-zero
-      -- elements.
-  , c_requested_event_direction :: VS.Vector CInt
-  -- TODO: this function is not called from C, so we can be smart and actually
-  -- use Maybe, instead of sentinel value
-  , c_next_time_event :: IO CDouble
-  , c_max_events :: CInt
-  , c_minstep :: CDouble
-  , c_maxstep :: Maybe CDouble
-  , c_fixedstep :: CDouble
-  , c_max_n_steps :: SunIndexType
-  , c_max_err_test_fails :: CInt
-  , c_init_step_size_set :: CInt
-  , c_init_step_size :: CDouble
-  , c_ontimepoint :: TimePointHandler
+      (VS.Vector CDouble -> IO (VS.Vector CDouble)) ->
+      IO CInt,
+    c_jac_set :: CInt,
+    -- | Jacobian for ode problem
+    c_jac :: FunPtr OdeJacobianCType,
+    -- | Jacobian for IDA problem
+    c_jac_ida :: FunPtr IDALsJacFn,
+    -- | If 0, use a dense matrix.
+    -- If non-0, use a sparse matrix with that number of non-zero
+    -- elements.
+    c_sparse_jac :: CInt,
+    c_requested_event_direction :: VS.Vector CInt,
+    -- TODO: this function is not called from C, so we can be smart and actually
+    -- use Maybe, instead of sentinel value
+    c_next_time_event :: IO CDouble,
+    c_max_events :: CInt,
+    c_minstep :: CDouble,
+    c_maxstep :: Maybe CDouble,
+    c_fixedstep :: CDouble,
+    c_max_n_steps :: SunIndexType,
+    c_max_err_test_fails :: CInt,
+    c_init_step_size_set :: CInt,
+    c_init_step_size :: CDouble,
+    c_ontimepoint :: TimePointHandler
   }
 
 data MethodType = Explicit | Implicit
@@ -155,7 +157,7 @@ class IsMethod method where
   methodType :: method -> MethodType
 
 matrixToSunMatrix :: Matrix Double -> T.SunMatrix
-matrixToSunMatrix m = T.SunMatrix { T.rows = nr, T.cols = nc, T.vals = vs }
+matrixToSunMatrix m = T.SunMatrix {T.rows = nr, T.cols = nc, T.vals = vs}
   where
     nr = fromIntegral $ H.rows m
     nc = fromIntegral $ H.cols m
@@ -164,16 +166,16 @@ matrixToSunMatrix m = T.SunMatrix { T.rows = nr, T.cols = nc, T.vals = vs }
 -- Contrary to the documentation, it appears that CVodeGetRootInfo
 -- may use both 1 and -1 to indicate a root, depending on the
 -- direction of the sign change. See near the end of cvRootfind.
-intToDirection :: Integral d => d -> Maybe CrossingDirection
+intToDirection :: (Integral d) => d -> Maybe CrossingDirection
 intToDirection d =
   case d of
-    1  -> Just Upwards
+    1 -> Just Upwards
     -1 -> Just Downwards
-    _  -> Nothing
+    _ -> Nothing
 
 -- | Almost inverse of 'intToDirection'. Map 'Upwards' to 1, 'Downwards' to
 -- -1, and 'AnyDirection' to 0.
-directionToInt :: Integral d => CrossingDirection -> d
+directionToInt :: (Integral d) => CrossingDirection -> d
 directionToInt d =
   case d of
     Upwards -> 1
@@ -188,6 +190,7 @@ foreign import ccall "wrapper"
 
 foreign import ccall "wrapper"
   mkOdeJacobianC :: OdeJacobianCType -> IO (FunPtr OdeJacobianCType)
+
 foreign import ccall "wrapper"
   mkIDALsJacFn :: IDALsJacFn -> IO (FunPtr IDALsJacFn)
 
@@ -197,35 +200,36 @@ foreign import ccall "wrapper"
 foreign import ccall "wrapper"
   mkIDARootFn :: IDARootFn -> IO (FunPtr IDARootFn)
 
-assembleSolverResult
-  :: OdeProblem
-  -> (CInt, SundialsDiagnostics)
-  -> CVars VS.Vector
-  -> IO (Either ErrorDiagnostics SundialsSolution)
-assembleSolverResult OdeProblem{..} (ret, diagnostics) CVars{..} = do
-  let
-    dim = VS.length odeInitCond
-    n_rows = fromIntegral . VS.head $ c_n_rows
-    output_mat = reshape (dim + 1) . VS.unsafeCoerceVector . subVector 0 ((dim + 1) * n_rows) $ c_output_mat
-    (local_errors, var_weights) =
-      if c_local_error_set VS.! 0 == 0
-        then (mempty, mempty)
-        else (VS.unsafeCoerceVector c_local_error, VS.unsafeCoerceVector c_var_weight)
+assembleSolverResult ::
+  OdeProblem ->
+  (CInt, SundialsDiagnostics) ->
+  CVars VS.Vector ->
+  IO (Either ErrorDiagnostics SundialsSolution)
+assembleSolverResult OdeProblem {..} (ret, diagnostics) CVars {..} = do
+  let dim = VS.length odeInitCond
+      n_rows = fromIntegral . VS.head $ c_n_rows
+      output_mat = reshape (dim + 1) . VS.unsafeCoerceVector . subVector 0 ((dim + 1) * n_rows) $ c_output_mat
+      (local_errors, var_weights) =
+        if c_local_error_set VS.! 0 == 0
+          then (mempty, mempty)
+          else (VS.unsafeCoerceVector c_local_error, VS.unsafeCoerceVector c_var_weight)
   return $
     if ret == T.cV_SUCCESS
       then
-        Right $ SundialsSolution
-          { actualTimeGrid = extractTimeGrid output_mat
-          , solutionMatrix = dropTimeGrid output_mat
-          , diagnostics
-          }
+        Right $
+          SundialsSolution
+            { actualTimeGrid = extractTimeGrid output_mat,
+              solutionMatrix = dropTimeGrid output_mat,
+              diagnostics
+            }
       else
-        Left ErrorDiagnostics
-          { partialResults = output_mat
-          , errorCode = fromIntegral ret
-          , errorEstimates = local_errors
-          , varWeights = var_weights
-          }
+        Left
+          ErrorDiagnostics
+            { partialResults = output_mat,
+              errorCode = fromIntegral ret,
+              errorEstimates = local_errors,
+              varWeights = var_weights
+            }
   where
     -- The time grid is the first column of the result matrix
     extractTimeGrid :: Matrix Double -> VS.Vector Double
@@ -239,11 +243,11 @@ assembleSolverResult OdeProblem{..} (ret, diagnostics) CVars{..} = do
 -- There doesn't seem to be a safe version of 'VS.unsafeFromForeignPtr0',
 -- nor a way to clone an immutable vector, so we emulate it via an
 -- intermediate mutable vector.
-vecFromPtr
-  :: VS.Storable a
-  => Ptr a
-  -> Int
-  -> IO (VS.Vector a)
+vecFromPtr ::
+  (VS.Storable a) =>
+  Ptr a ->
+  Int ->
+  IO (VS.Vector a)
 vecFromPtr ptr n = do
   fptr <- newForeignPtr_ ptr
   let mv = VSM.unsafeFromForeignPtr0 fptr n
@@ -255,34 +259,37 @@ vecFromPtr ptr n = do
 
 -- | The Katip payload for logging Sundials errors
 data SundialsErrorContext = SundialsErrorContext
-  { sundialsErrorCode :: !Int
-  , sundialsErrorModule :: !T.Text
-  , sundialsErrorFunction :: !T.Text
-  } deriving Generic
+  { sundialsErrorCode :: !Int,
+    sundialsErrorModule :: !T.Text,
+    sundialsErrorFunction :: !T.Text
+  }
+  deriving (Generic)
+
 instance ToJSON SundialsErrorContext
+
 instance ToObject SundialsErrorContext
+
 instance LogItem SundialsErrorContext where
   payloadKeys _ _ = AllKeys
 
-
 type ReportErrorFn =
-  (  CInt    -- error code
-  -> CString -- module name
-  -> CString -- function name
-  -> CString -- the message
-  -> Ptr ()  -- user data (ignored)
-  -> IO ()
+  ( CInt -> -- error code
+    CString -> -- module name
+    CString -> -- function name
+    CString -> -- the message
+    Ptr () -> -- user data (ignored)
+    IO ()
   )
 
 type ReportErrorFnNew =
-                 CInt -- Line no
-                -> Ptr CChar -- function name
-                -> Ptr CChar -- file
-                -> Ptr CChar -- message
-                -> CInt -- err code
-                -> Ptr () -- user data
-                -> Ptr () -- sundial context
-                -> IO ()
+  CInt -> -- Line no
+  Ptr CChar -> -- function name
+  Ptr CChar -> -- file
+  Ptr CChar -> -- message
+  CInt -> -- err code
+  Ptr () -> -- user data
+  Ptr () -> -- sundial context
+  IO ()
 
 wrapErrorNewApi :: ReportErrorFn -> ReportErrorFnNew
 wrapErrorNewApi f _lineNumber functionName moduleName errorMessage errorCode userData _sundialContext = f errorCode moduleName functionName errorMessage userData
@@ -293,25 +300,27 @@ cstringToText = fmap T.decodeUtf8 . BS.packCString
 reportErrorWithKatip :: LogEnv -> ReportErrorFn
 reportErrorWithKatip log_env err_code c_mod_name c_func_name c_msg _userdata = do
   -- See Note [CV_TOO_CLOSE]
-  if err_code == T.cV_TOO_CLOSE then pure () else do
-  let
-  mod_name <- cstringToText c_mod_name
-  func_name <- cstringToText c_func_name
-  msg <- cstringToText c_msg
-  let
-    severity :: Severity
-    severity =
-      if err_code <= 0
-        then ErrorS
-        else InfoS
-    errCtx :: SundialsErrorContext
-    errCtx = SundialsErrorContext
-      { sundialsErrorCode = fromIntegral err_code
-      , sundialsErrorModule = mod_name
-      , sundialsErrorFunction = func_name
-      }
-  flip runReaderT log_env . unKatipT $ do
-    logF errCtx "sundials" severity (logStr msg)
+  if err_code == T.cV_TOO_CLOSE
+    then pure ()
+    else do
+      let
+      mod_name <- cstringToText c_mod_name
+      func_name <- cstringToText c_func_name
+      msg <- cstringToText c_msg
+      let severity :: Severity
+          severity =
+            if err_code <= 0
+              then ErrorS
+              else InfoS
+          errCtx :: SundialsErrorContext
+          errCtx =
+            SundialsErrorContext
+              { sundialsErrorCode = fromIntegral err_code,
+                sundialsErrorModule = mod_name,
+                sundialsErrorFunction = func_name
+              }
+      flip runReaderT log_env . unKatipT $ do
+        logF errCtx "sundials" severity (logStr msg)
 
 debugMsgWithKatip :: LogEnv -> String -> IO ()
 debugMsgWithKatip log_env text = do
@@ -321,37 +330,40 @@ debugMsgWithKatip log_env text = do
 -- From the former Types module
 
 data EventHandlerResult = EventHandlerResult
-  { eventStopSolver :: !Bool
-    -- ^ should we stop the solver after handling this event?
-  , eventRecord :: !Bool
-    -- ^ should we record the state before and after the event in the ODE
+  { -- | should we stop the solver after handling this event?
+    eventStopSolver :: !Bool,
+    -- | should we record the state before and after the event in the ODE
     -- solution?
-  , eventNewState :: !(VS.Vector Double)
-    -- ^ the new state after the event has been applied
-  , eventDoReinit :: !Bool
-  -- ^ Should the solver must be reinitialised after this event
-  -- It should if the event was triggered to handle a discontinuity, or if the event introduced any value (e.g. a discontinuity).
-  -- But it is possible that the handler is called for nothing (time based
-  -- event with complex condition, ...) or that the handler decides that the
-  -- change is relevant for the solver accuracy (for example, if the changed
-  -- value is NOT used in the ode system for example, and only for statistics
+    eventRecord :: !Bool,
+    -- | the new state after the event has been applied
+    eventNewState :: !(VS.Vector Double),
+    -- | Should the solver must be reinitialised after this event
+    -- It should if the event was triggered to handle a discontinuity, or if the event introduced any value (e.g. a discontinuity).
+    -- But it is possible that the handler is called for nothing (time based
+    -- event with complex condition, ...) or that the handler decides that the
+    -- change is relevant for the solver accuracy (for example, if the changed
+    -- value is NOT used in the ode system for example, and only for statistics
+    eventDoReinit :: !Bool
   }
 
-type EventHandler
-  =  Double -- ^ time
-  -> VS.Vector Double -- ^ values of the variables
-  -> VS.Vector Double -- ^ values of the derivatives of variables
-  -> VS.Vector Int
-    -- ^ Vector of triggered event indices.
-    -- If the vector is empty, this is a time-based event.
-  -> (VS.Vector Double -> IO (VS.Vector Double))
-  -- ^ A callback function that the handle can call after handling an event
+type EventHandler =
+  -- | time
+  Double ->
+  -- | values of the variables
+  VS.Vector Double ->
+  -- | values of the derivatives of variables
+  VS.Vector Double ->
+  -- | Vector of triggered event indices.
+  -- If the vector is empty, this is a time-based event.
+  VS.Vector Int ->
+  -- | A callback function that the handle can call after handling an event
   -- Depending on the solver, the event handling may have impact on the solver
   -- values and the event handler may want to see updated values.
   -- This is the responsability of the event handler to call this callback if
   -- it had done changes into the state variable which should be taken into
   -- account before next event.
-  -> IO EventHandlerResult
+  (VS.Vector Double -> IO (VS.Vector Double)) ->
+  IO EventHandlerResult
 
 -- | This callback will be called when a timepoint is saved
 -- Maybe in the future we'll use this as a stream provider, but for now it is
@@ -359,15 +371,16 @@ type EventHandler
 -- Note that this is NOT required anymore to build a stream abstraction,
 -- because the main loop is in haskell, so it can just stream the timepoint
 -- directly.
-type TimePointHandler
-  = CDouble
-  -- ^ Current time
-  -> VSM.MVector VSM.RealWorld CDouble
-  -- ^ values of the variable
-  ->  CInt -- ^ timepoint index
-  -> IO SundialsDiagnostics
-  -- ^ Get the different diagnostics
-  -> IO ()
+type TimePointHandler =
+  -- | Current time
+  CDouble ->
+  -- | values of the variable
+  VSM.MVector VSM.RealWorld CDouble ->
+  -- | timepoint index
+  CInt ->
+  -- | Get the different diagnostics
+  IO SundialsDiagnostics ->
+  IO ()
 
 -- | Represents the inner function of the system. The solver can solve
 -- "residual problem" (including algebraic equations), such as @f(t, v, v') = 0@ with the 'IDAMethod'
@@ -376,86 +389,87 @@ type TimePointHandler
 --
 -- Note that you can provide an 'OdeFunctions' while using 'IDAMethod', the
 -- solver will wrap the functions for you.
-data ProblemFunctions = 
-      -- | When solving a "ode" problem, such as @dv/dt = f(t, v)@
-       -- The right-hand side of the system: either a Haskell function or
-       -- a pointer to a compiled function. That's the @f@ function.
-      OdeProblemFunctions OdeRhs
-      |
-      -- | When solving a "residual" problem, such as @f(t, v, v') = 0@
-      ResidualProblemFunctions ResidualFunctions
+data ProblemFunctions
+  = -- | When solving a "ode" problem, such as @dv/dt = f(t, v)@
+    -- The right-hand side of the system: either a Haskell function or
+    -- a pointer to a compiled function. That's the @f@ function.
+    OdeProblemFunctions OdeRhs
+  | -- | When solving a "residual" problem, such as @f(t, v, v') = 0@
+    ResidualProblemFunctions ResidualFunctions
 
 -- | When solving a "residual" problem, such as @f(t, v, v') = 0@
-data ResidualFunctions = ResidualFunctions {
-        odeResidual :: OdeResidual
-      -- ^ The residual function. Is available, when solving with IDA, it will be
-      -- used instead of the 'odeRhs'. That's the "f" function.
-      , odeDifferentials :: (VS.Vector Double)
-      -- ^ Only when solving with IDA, tells if the unknown is driven by an ode
-      -- (==1.0) or by an algebraic equation (==0.0). Filled as all derivatives if
-      -- not provided.
-      , odeInitialDifferentials :: (VS.Vector Double)
-      -- ^ Only when solving with IDA, provides the initial derivatievs of the
-      -- unknown. Will be computed by the solver if not provided.
-    }
+data ResidualFunctions = ResidualFunctions
+  { -- | The residual function. Is available, when solving with IDA, it will be
+    -- used instead of the 'odeRhs'. That's the "f" function.
+    odeResidual :: OdeResidual,
+    -- | Only when solving with IDA, tells if the unknown is driven by an ode
+    -- (==1.0) or by an algebraic equation (==0.0). Filled as all derivatives if
+    -- not provided.
+    odeDifferentials :: (VS.Vector Double),
+    -- | Only when solving with IDA, provides the initial derivatievs of the
+    -- unknown. Will be computed by the solver if not provided.
+    odeInitialDifferentials :: (VS.Vector Double)
+  }
 
 data OdeProblem = OdeProblem
-  { odeEventConditions :: EventConditions
-    -- ^ The event conditions. Used either for "ode" or "residual" problem.
+  { -- | The event conditions. Used either for "ode" or "residual" problem.
     -- TODO: exposes the event condition function for residual, it allows event
     -- to test @yp@.
-  , odeEventDirections :: V.Vector CrossingDirection
-    -- ^ The requested directions of 0 crossing for each event. Also, the
+    odeEventConditions :: EventConditions,
+    -- | The requested directions of 0 crossing for each event. Also, the
     -- length of this vector tells us the number of events (even when
     -- 'odeEventConditions' is represented by a single C function).
-  , odeMaxEvents :: !Int
-    -- ^ The maximal number of events that may occur. This is needed to
+    odeEventDirections :: V.Vector CrossingDirection,
+    -- | The maximal number of events that may occur. This is needed to
     -- allocate enough space to store the events. If more events occur, an
     -- error is returned.
-  , odeEventHandler :: EventHandler -- ^ The event handler.
-  , odeTimeBasedEvents :: TimeEventSpec
-  , odeFunctions :: ProblemFunctions
-  , odeJacobian :: Maybe OdeJacobian
-    -- ^ The optional Jacobian (the arguments are the time and the state
+    odeMaxEvents :: !Int,
+    -- | The event handler.
+    odeEventHandler :: EventHandler,
+    odeTimeBasedEvents :: TimeEventSpec,
+    odeFunctions :: ProblemFunctions,
+    -- | The optional Jacobian (the arguments are the time and the state
     -- vector). Used either for "ode" or "residual" problems.
     -- TODO: expose the Jacobian for residual problem, it is parametrized by
     -- the `yp` parameter.
-  , odeInitCond :: VS.Vector Double
-    -- ^ The initial conditions of the problem.
-  , odeSolTimes :: VS.Vector Double
-    -- ^ The requested solution times. The actual solution times may be
+    odeJacobian :: Maybe OdeJacobian,
+    -- | The initial conditions of the problem.
+    odeInitCond :: VS.Vector Double,
+    -- | The requested solution times. The actual solution times may be
     -- larger if any events occurred.
-  , odeTolerances :: Tolerances
-    -- ^ How much error is tolerated in each variable.
-  , odeOnTimePoint :: Maybe TimePointHandler
-  -- ^ This is called everytime the solver stores a timepoint
+    odeSolTimes :: VS.Vector Double,
+    -- | How much error is tolerated in each variable.
+    odeTolerances :: Tolerances,
+    -- | This is called everytime the solver stores a timepoint
+    odeOnTimePoint :: Maybe TimePointHandler
   }
 
 data Tolerances = Tolerances
-  { relTolerance :: !CDouble
-  , absTolerances :: Either CDouble (VS.Vector CDouble)
-    -- ^ If 'Left', then the same tolerance is used for all variables.
+  { relTolerance :: !CDouble,
+    -- | If 'Left', then the same tolerance is used for all variables.
     --
     -- If 'Right', the vector should contain one tolerance per variable.
-  } deriving (Show, Eq, Ord)
+    absTolerances :: Either CDouble (VS.Vector CDouble)
+  }
+  deriving (Show, Eq, Ord)
 
 -- | The type of the C ODE RHS function.
 type OdeRhsCType = CDouble -> Ptr SunVector -> Ptr SunVector -> Ptr UserData -> IO CInt
 
 -- | The residual function for IDA solving
 type IDAResFn =
-   -- t
-   CDouble ->
-   -- y
-   Ptr SunVector ->
-   -- yp
-   Ptr SunVector ->
-   -- F(t, y, yp) (out parameter)
-   Ptr SunVector ->
-   -- user data
-   Ptr UserData ->
-   -- | Return code
-   IO CInt
+  -- t
+  CDouble ->
+  -- y
+  Ptr SunVector ->
+  -- yp
+  Ptr SunVector ->
+  -- F(t, y, yp) (out parameter)
+  Ptr SunVector ->
+  -- user data
+  Ptr UserData ->
+  -- | Return code
+  IO CInt
 
 data UserData
 
@@ -471,34 +485,54 @@ data OdeResidual
   | OdeResidualC (FunPtr IDAResFn) (Ptr UserData)
 
 -- | A version of 'OdeRhsHaskell' that accepts a pure function
-odeRhsPure
-  :: (CDouble -> VS.Vector CDouble -> VS.Vector CDouble)
-  -> ProblemFunctions
+odeRhsPure ::
+  (CDouble -> VS.Vector CDouble -> VS.Vector CDouble) ->
+  ProblemFunctions
 odeRhsPure f = OdeProblemFunctions $ OdeRhsHaskell $ \t y -> return $ f t y
 
-type OdeJacobianCType
-  =  SunRealType   -- ^ @realtype t@
-  -> Ptr SunVector -- ^ @N_Vector y@
-  -> Ptr SunVector -- ^ @N_Vector fy@
-  -> Ptr SunMatrix -- ^ @SUNMatrix Jac@
-  -> Ptr UserData  -- ^ @void *user_data@
-  -> Ptr SunVector -- ^ @N_Vector tmp1@
-  -> Ptr SunVector -- ^ @N_Vector tmp2@
-  -> Ptr SunVector -- ^ @N_Vector tmp3@
-  -> IO CInt       -- ^ return value (0 if successful, >0 for a recoverable error, <0 for an unrecoverable error)
+type OdeJacobianCType =
+  -- | @realtype t@
+  SunRealType ->
+  -- | @N_Vector y@
+  Ptr SunVector ->
+  -- | @N_Vector fy@
+  Ptr SunVector ->
+  -- | @SUNMatrix Jac@
+  Ptr SunMatrix ->
+  -- | @void *user_data@
+  Ptr UserData ->
+  -- | @N_Vector tmp1@
+  Ptr SunVector ->
+  -- | @N_Vector tmp2@
+  Ptr SunVector ->
+  -- | @N_Vector tmp3@
+  Ptr SunVector ->
+  -- | return value (0 if successful, >0 for a recoverable error, <0 for an unrecoverable error)
+  IO CInt
 
-type IDALsJacFn
-  =  SunRealType   -- ^ @realtype t@
-  ->  SunRealType   -- ^ @realtype cj@
-  -> Ptr SunVector -- ^ @N_Vector y@
-  -> Ptr SunVector -- ^ @N_Vector yp@
-  -> Ptr SunVector -- ^ @N_Vector r@
-  -> Ptr SunMatrix -- ^ @SUNMatrix Jac@
-  -> Ptr UserData  -- ^ @void *user_data@
-  -> Ptr SunVector -- ^ @N_Vector tmp1@
-  -> Ptr SunVector -- ^ @N_Vector tmp2@
-  -> Ptr SunVector -- ^ @N_Vector tmp3@
-  -> IO CInt       -- ^ return value (0 if successful, >0 for a recoverable error, <0 for an unrecoverable error)
+type IDALsJacFn =
+  -- | @realtype t@
+  SunRealType ->
+  -- | @realtype cj@
+  SunRealType ->
+  -- | @N_Vector y@
+  Ptr SunVector ->
+  -- | @N_Vector yp@
+  Ptr SunVector ->
+  -- | @N_Vector r@
+  Ptr SunVector ->
+  -- | @SUNMatrix Jac@
+  Ptr SunMatrix ->
+  -- | @void *user_data@
+  Ptr UserData ->
+  -- | @N_Vector tmp1@
+  Ptr SunVector ->
+  -- | @N_Vector tmp2@
+  Ptr SunVector ->
+  -- | @N_Vector tmp3@
+  Ptr SunVector ->
+  -- | return value (0 if successful, >0 for a recoverable error, <0 for an unrecoverable error)
+  IO CInt
 
 -- | The Jacobian of the right-hand side of an ODE system.
 --
@@ -508,24 +542,34 @@ data OdeJacobian
   | OdeJacobianC (FunPtr OdeJacobianCType)
 
 data JacobianRepr
-  = SparseJacobian !SparsePattern -- ^ sparse Jacobian with the given sparse pattern
+  = -- | sparse Jacobian with the given sparse pattern
+    SparseJacobian !SparsePattern
   | DenseJacobian
   deriving (Show)
 
-type EventConditionCType
-  =  SunRealType     -- ^ @realtype t@
-  -> Ptr SunVector   -- ^ @N_Vector y@
-  -> Ptr SunRealType -- ^ @realtype *gout@
-  -> Ptr UserData    -- ^ @void *user_data@
-  -> IO CInt
+type EventConditionCType =
+  -- | @realtype t@
+  SunRealType ->
+  -- | @N_Vector y@
+  Ptr SunVector ->
+  -- | @realtype *gout@
+  Ptr SunRealType ->
+  -- | @void *user_data@
+  Ptr UserData ->
+  IO CInt
 
-type IDARootFn
-  =  SunRealType     -- ^ @realtype t@
-  -> Ptr SunVector   -- ^ @N_Vector y@
-  -> Ptr SunVector   -- ^ @N_Vector yp@
-  -> Ptr SunRealType -- ^ @realtype *gout@
-  -> Ptr UserData    -- ^ @void *user_data@
-  -> IO CInt
+type IDARootFn =
+  -- | @realtype t@
+  SunRealType ->
+  -- | @N_Vector y@
+  Ptr SunVector ->
+  -- | @N_Vector yp@
+  Ptr SunVector ->
+  -- | @realtype *gout@
+  Ptr SunRealType ->
+  -- | @void *user_data@
+  Ptr UserData ->
+  IO CInt
 
 data EventConditions
   = EventConditionsHaskell (Double -> VS.Vector Double -> IO (VS.Vector Double))
@@ -539,96 +583,101 @@ eventConditionsPure :: V.Vector (Double -> VS.Vector Double -> Double) -> EventC
 eventConditionsPure conds = EventConditionsHaskell $ \t y ->
   pure $ V.convert $ V.map (\cond -> cond t y) conds
 
-data SundialsDiagnostics = SundialsDiagnostics {
-    odeGetNumSteps               :: !Int
-  , odeGetNumStepAttempts        :: !Int
-  , odeGetNumRhsEvals_fe         :: !Int
-  , odeGetNumRhsEvals_fi         :: !Int
-  , odeGetNumLinSolvSetups       :: !Int
-  , odeGetNumErrTestFails        :: !Int
-  , odeGetNumNonlinSolvIters     :: !Int
-  , odeGetNumNonlinSolvConvFails :: !Int
-  , dlsGetNumJacEvals            :: !Int
-  , dlsGetNumRhsEvals            :: !Int
-  , odeMaxEventsReached          :: !Bool
-  , odeNumRootEvals              :: !Int
-  , odeNumReinit                 :: !Int
-  } deriving (Eq, Show, Generic, NFData)
+data SundialsDiagnostics = SundialsDiagnostics
+  { odeGetNumSteps :: !Int,
+    odeGetNumStepAttempts :: !Int,
+    odeGetNumRhsEvals_fe :: !Int,
+    odeGetNumRhsEvals_fi :: !Int,
+    odeGetNumLinSolvSetups :: !Int,
+    odeGetNumErrTestFails :: !Int,
+    odeGetNumNonlinSolvIters :: !Int,
+    odeGetNumNonlinSolvConvFails :: !Int,
+    dlsGetNumJacEvals :: !Int,
+    dlsGetNumRhsEvals :: !Int,
+    odeMaxEventsReached :: !Bool,
+    odeNumRootEvals :: !Int,
+    odeNumReinit :: !Int
+  }
+  deriving (Eq, Show, Generic, NFData)
 
 instance Semigroup SundialsDiagnostics where
-   (<>) (SundialsDiagnostics
-          numSteps_1
-          numStepAttempts_1
-          numRhsEvals_fe_1
-          numRhsEvals_fi_1
-          numLinSolvSetups_1
-          numErrTestFails_1
-          numNonlinSolvIters_1
-          numNonlinSolvConvFails_1
-          numJacEvals_1
-          numRhsEvals_1
-          reachedMaxEvents_1
-          numRoots_1
-          numReinit_1)
+  (<>)
+    ( SundialsDiagnostics
+        numSteps_1
+        numStepAttempts_1
+        numRhsEvals_fe_1
+        numRhsEvals_fi_1
+        numLinSolvSetups_1
+        numErrTestFails_1
+        numNonlinSolvIters_1
+        numNonlinSolvConvFails_1
+        numJacEvals_1
+        numRhsEvals_1
+        reachedMaxEvents_1
+        numRoots_1
+        numReinit_1
+      )
+    ( SundialsDiagnostics
+        numSteps_2
+        numStepAttempts_2
+        numRhsEvals_fe_2
+        numRhsEvals_fi_2
+        numLinSolvSetups_2
+        numErrTestFails_2
+        numNonlinSolvIters_2
+        numNonlinSolvConvFails_2
+        numJacEvals_2
+        numRhsEvals_2
+        reachedMaxEvents_2
+        numRoots_2
+        numReinit_2
+      ) =
+      SundialsDiagnostics
+        (numSteps_2 + numSteps_1)
+        (numStepAttempts_2 + numStepAttempts_1)
+        (numRhsEvals_fe_2 + numRhsEvals_fe_1)
+        (numRhsEvals_fi_2 + numRhsEvals_fi_1)
+        (numLinSolvSetups_2 + numLinSolvSetups_1)
+        (numErrTestFails_2 + numErrTestFails_1)
+        (numNonlinSolvIters_2 + numNonlinSolvIters_1)
+        (numNonlinSolvConvFails_2 + numNonlinSolvConvFails_1)
+        (numJacEvals_2 + numJacEvals_1)
+        (numRhsEvals_2 + numRhsEvals_1)
+        (reachedMaxEvents_1 || reachedMaxEvents_2)
+        (numRoots_1 + numRoots_2)
+        (numReinit_1 + numReinit_2)
 
-        (SundialsDiagnostics
-          numSteps_2
-          numStepAttempts_2
-          numRhsEvals_fe_2
-          numRhsEvals_fi_2
-          numLinSolvSetups_2
-          numErrTestFails_2
-          numNonlinSolvIters_2
-          numNonlinSolvConvFails_2
-          numJacEvals_2
-          numRhsEvals_2
-          reachedMaxEvents_2
-          numRoots_2
-          numReinit_2)
+instance Monoid SundialsDiagnostics where
+  mempty = SundialsDiagnostics 0 0 0 0 0 0 0 0 0 0 False 0 0
 
-      = SundialsDiagnostics
-          (numSteps_2 + numSteps_1)
-          (numStepAttempts_2 + numStepAttempts_1)
-          (numRhsEvals_fe_2 + numRhsEvals_fe_1)
-          (numRhsEvals_fi_2 + numRhsEvals_fi_1)
-          (numLinSolvSetups_2 + numLinSolvSetups_1)
-          (numErrTestFails_2 + numErrTestFails_1)
-          (numNonlinSolvIters_2 + numNonlinSolvIters_1)
-          (numNonlinSolvConvFails_2 + numNonlinSolvConvFails_1)
-          (numJacEvals_2 + numJacEvals_1)
-          (numRhsEvals_2 + numRhsEvals_1)
-          (reachedMaxEvents_1 || reachedMaxEvents_2)
-          (numRoots_1 + numRoots_2)
-          (numReinit_1 + numReinit_2)
-
-instance Monoid SundialsDiagnostics
-  where
-    mempty = SundialsDiagnostics 0 0 0 0 0 0 0 0 0 0 False 0 0
-
-data SundialsSolution =
-  SundialsSolution
-  { actualTimeGrid :: VS.Vector Double    -- ^ actual time grid returned by the solver (with duplicated event times)
-  , solutionMatrix :: Matrix Double       -- ^ matrix of solutions: each column is an unknwown
-  , diagnostics    :: SundialsDiagnostics -- ^ usual Sundials diagnostics
+data SundialsSolution
+  = SundialsSolution
+  { -- | actual time grid returned by the solver (with duplicated event times)
+    actualTimeGrid :: VS.Vector Double,
+    -- | matrix of solutions: each column is an unknwown
+    solutionMatrix :: Matrix Double,
+    -- | usual Sundials diagnostics
+    diagnostics :: SundialsDiagnostics
   }
   deriving (Show)
 
 data ErrorDiagnostics = ErrorDiagnostics
-  { errorCode :: !Int
-    -- ^ The numeric error code. Mostly useless at this point, since it is
+  { -- | The numeric error code. Mostly useless at this point, since it is
     -- set to 1 under most error conditions. See 'solveOdeC'.
-  , errorEstimates :: !(VS.Vector Double)
-    -- ^ The local error estimates as returned by @CVodeGetEstLocalErrors@.
+    errorCode :: !Int,
+    -- | The local error estimates as returned by @CVodeGetEstLocalErrors@.
     -- Either an empty vector, or has the same dimensionality as the state
     -- space.
-  , varWeights :: !(VS.Vector Double)
-    -- ^ The weights with which errors are combined, equal to @1 / (atol_i + y_i * rtol)@.
+    errorEstimates :: !(VS.Vector Double),
+    -- | The weights with which errors are combined, equal to @1 / (atol_i + y_i * rtol)@.
     -- Either an empty vector, or has the same dimensionality as the state
     -- space.
-  , partialResults :: !(Matrix Double)
-    -- ^ Partial solution of the ODE system, up until the moment when
+    varWeights :: !(VS.Vector Double),
+    -- | Partial solution of the ODE system, up until the moment when
     -- solving failed. Contains the time as its first column.
-  } deriving Show
+    partialResults :: !(Matrix Double)
+  }
+  deriving (Show)
 
 -- | The direction in which a function should cross the x axis
 data CrossingDirection = Upwards | Downwards | AnyDirection
@@ -665,6 +714,4 @@ newtype TimeEventSpec = TimeEventSpec (IO Double)
 - solver, which will help us introducing new solver (such as IDA).
 -}
 
-
 -- ** Sundial bindings
-
