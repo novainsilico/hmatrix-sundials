@@ -19,6 +19,7 @@ import Control.Exception
 import Control.Monad (when)
 import Control.Monad.State
 import Data.Bool
+import Data.Coerce (coerce)
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Storable.Mutable as VSM
@@ -32,7 +33,6 @@ import Numeric.Sundials.Bindings.Sundials
 import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
 import Text.Printf (printf)
-import Data.Coerce (coerce)
 
 -- | Available methods for CVode
 data CVMethod
@@ -133,7 +133,6 @@ solveC CConsts {..} CVars {..} log_env =
 
                   -- /* Specify the scalar relative tolerance and vector absolute tolerances */
                   cCVodeSVtolerances cvode_mem c_rtol tv >>= check 6212
-
 
                   -- /* Specify the root function */
                   when (c_n_event_specs /= 0) $ do
@@ -305,7 +304,6 @@ solveC CConsts {..} CVars {..} log_env =
                                                   go (i + 1) n_events_triggered
                                     go 0 0
 
-
                             (record_events, stop_solver, do_reinit) <-
                               if (n_events_triggered > 0 || time_based_event)
                                 then do
@@ -365,7 +363,7 @@ solveC CConsts {..} CVars {..} log_env =
                               if (fromIntegral s.event_ind >= c_max_events)
                                 then do
                                   debug ("Reached max_events; returning")
-                                  modify $ \s -> s {max_events_reached = True }
+                                  modify $ \s -> s {max_events_reached = True}
                                   pure 1
                                 else pure stop_solver
                             when (stop_solver /= 0) $ do
@@ -379,12 +377,12 @@ solveC CConsts {..} CVars {..} log_env =
                               -- Before reinit, we get the diagnostics and update the current diagnostics
                               state <- get
                               diagnostics <- liftIO $ getDiagnostics cvode_mem state
-                              put $ state { current_diagnostics = diagnostics }
+                              put $ state {current_diagnostics = diagnostics}
 
                               -- This reset the diagnostics stored in cvode_mem
                               liftIO $ cCVodeReInit cvode_mem t y
 
-                              modify $ \s -> s { nb_reinit = nb_reinit s + 1 }
+                              modify $ \s -> s {nb_reinit = nb_reinit s + 1}
 
                           when (t == ti) $ do
                             modify $ \s -> s {input_ind = s.input_ind + 1}
@@ -399,52 +397,53 @@ solveC CConsts {..} CVars {..} log_env =
 
 getDiagnostics :: CVodeMem -> LoopState -> IO SundialsDiagnostics
 getDiagnostics cvode_mem loopState = do
-      -- /* Get some final statistics on how the solve progressed */
-      nst <- cvGet cCVodeGetNumSteps cvode_mem
+  -- /* Get some final statistics on how the solve progressed */
+  nst <- cvGet cCVodeGetNumSteps cvode_mem
 
-      -- /* FIXME */
-      let nst_a = 0 :: Int
+  -- /* FIXME */
+  let nst_a = 0 :: Int
 
-      nfe <- cvGet cCVodeGetNumRhsEvals cvode_mem
+  nfe <- cvGet cCVodeGetNumRhsEvals cvode_mem
 
-      -- /* FIXME */
-      let nfi = 0 :: Int
+  -- /* FIXME */
+  let nfi = 0 :: Int
 
-      nsetups <- cvGet cCVodeGetNumLinSolvSetups cvode_mem
+  nsetups <- cvGet cCVodeGetNumLinSolvSetups cvode_mem
 
-      netf <- cvGet cCVodeGetNumErrTestFails cvode_mem
+  netf <- cvGet cCVodeGetNumErrTestFails cvode_mem
 
-      nni <- cvGet cCVodeGetNumNonlinSolvIters cvode_mem
+  nni <- cvGet cCVodeGetNumNonlinSolvIters cvode_mem
 
-      ncfn <- cvGet cCVodeGetNumNonlinSolvConvFails cvode_mem
+  ncfn <- cvGet cCVodeGetNumNonlinSolvConvFails cvode_mem
 
-      nje <- cvGet cCVodeGetNumJacEvals cvode_mem
+  nje <- cvGet cCVodeGetNumJacEvals cvode_mem
 
-      nfeLS <- cvGet cCVodeGetNumLinRhsEvals cvode_mem
+  nfeLS <- cvGet cCVodeGetNumLinRhsEvals cvode_mem
 
-      gevals <- cvGet cCVodeGetNumGEvals cvode_mem
+  gevals <- cvGet cCVodeGetNumGEvals cvode_mem
 
-      let diagnostics = SundialsDiagnostics
-             (fromIntegral $ nst)
-             (fromIntegral $ nst_a)
-             (fromIntegral $ nfe)
-             (fromIntegral $ nfi)
-             (fromIntegral $ nsetups)
-             (fromIntegral $ netf)
-             (fromIntegral $ nni)
-             (fromIntegral $ ncfn)
-             (fromIntegral $ nje)
-             (fromIntegral $ nfeLS)
-             False
-             (fromIntegral gevals)
-             0
+  let diagnostics =
+        SundialsDiagnostics
+          (fromIntegral $ nst)
+          (fromIntegral $ nst_a)
+          (fromIntegral $ nfe)
+          (fromIntegral $ nfi)
+          (fromIntegral $ nsetups)
+          (fromIntegral $ netf)
+          (fromIntegral $ nni)
+          (fromIntegral $ ncfn)
+          (fromIntegral $ nje)
+          (fromIntegral $ nfeLS)
+          False
+          (fromIntegral gevals)
+          0
 
-      -- Some stats are not accumulated.
-      pure $ (diagnostics <> current_diagnostics loopState)
-            {
-                 odeMaxEventsReached = loopState.max_events_reached,
-                 odeNumReinit = loopState.nb_reinit
-            }
+  -- Some stats are not accumulated.
+  pure $
+    (diagnostics <> current_diagnostics loopState)
+      { odeMaxEventsReached = loopState.max_events_reached,
+        odeNumReinit = loopState.nb_reinit
+      }
 
 --  |]
 

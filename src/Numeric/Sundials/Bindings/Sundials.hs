@@ -76,7 +76,6 @@ failOnError errCode = do
     msg <- peekCString errMsg
     error msg
 
-
 -- | Set an error handler (and dispable the other ones)
 setErrorHandler :: SUNContext -> FunPtr ReportErrorFnNew -> IO ()
 setErrorHandler sunctx handler = do
@@ -86,14 +85,16 @@ setErrorHandler sunctx handler = do
 -- * Logs
 
 newtype SUNLogger = SUNLogger (Ptr Void)
-  deriving newtype Storable
+  deriving newtype (Storable)
 
 foreign import ccall "SUNContext_GetLogger" cSUNContext_GetLogger :: SUNContext -> Ptr SUNLogger -> IO CInt
 
-
 foreign import ccall "SUNLogger_SetErrorFilename" cSUNLogger_SetErrorFilename :: SUNLogger -> CString -> IO ()
+
 foreign import ccall "SUNLogger_SetWarningFilename" cSUNLogger_SetWarningFilename :: SUNLogger -> CString -> IO ()
+
 foreign import ccall "SUNLogger_SetInfoFilename" cSUNLogger_SetInfoFilename :: SUNLogger -> CString -> IO ()
+
 foreign import ccall "SUNLogger_SetDebugFilename" cSUNLogger_SetDebugFilename :: SUNLogger -> CString -> IO ()
 
 -- * Vectors
@@ -106,7 +107,6 @@ foreign import ccall "N_VNew_Serial" cN_VNew_Serial :: SunIndexType -> SUNContex
 {-# WARNING cN_VNew_Serial "Prefere 'withNVector_Serial' to avoid memory leaks." #-}
 
 foreign import ccall "N_VDestroy" cN_VDestroy :: N_Vector -> IO ()
-
 
 -- TODO: build a wrapper which init the vector
 withNVector_Serial :: SunIndexType -> SUNContext -> Int -> (N_Vector -> IO a) -> IO a
@@ -261,9 +261,9 @@ All the call are marked (implicitly) as "safe" because they can, in theory, all 
 handleTermination :: CInt -> (LoopState -> IO SundialsDiagnostics) -> IO LoopState -> IO (CInt, SundialsDiagnostics)
 handleTermination success getDiagnostics action = do
   let end finalState = do
-      diagnostics <- getDiagnostics finalState
-      pure (success, diagnostics)
-       
+        diagnostics <- getDiagnostics finalState
+        pure (success, diagnostics)
+
   resM <- try action
   case resM of
     Left (ReturnCode c)
