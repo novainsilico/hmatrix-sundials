@@ -292,14 +292,14 @@ solveC CConsts {..} CVars {..} log_env =
                           debug $ printf "IDASolve returned %d; now t = %.17g\n" (fromIntegral flag :: Int) (coerce t :: Double)
                           let root_based_event = flag == IDA_ROOT_RETURN
                           let time_based_event = t == next_time_event
-                          (t, _flag) <-
+                          t <-
                             if flag == IDA_TOO_CLOSE && not time_based_event
                               then do
                                 --     /* See Note [IDA_TOO_CLOSE]
                                 --        No solving was required; just set the time t manually and continue
                                 --        as if solving succeeded. */
                                 debug $ printf "Got IDA_TOO_CLOSE; no solving was required; proceeding to t = %.17g" (coerce next_stop_time :: Double)
-                                pure (next_stop_time, flag)
+                                pure next_stop_time
                               else do
                                 s <- get
                                 if t == next_stop_time && t == s.t_start && flag == IDA_ROOT_RETURN && not time_based_event
@@ -310,7 +310,7 @@ solveC CConsts {..} CVars {..} log_env =
                                     --        Pretend that the root didn't happen, lest we keep handling it
                                     --        forever. */
                                     debug $ ("Got a root but t == t_start == next_stop_time; pretending it didn't happen" :: String)
-                                    pure (t, IDA_SUCCESS)
+                                    pure t
                                   else do
                                     if not (flag == IDA_TOO_CLOSE && time_based_event) && flag < 0
                                       then do
@@ -330,7 +330,7 @@ solveC CConsts {..} CVars {..} log_env =
 
                                               VSM.write c_local_error_set 0 1
                                             liftIO $ throwIO (ReturnCode (fromIntegral flag))
-                                      else pure (t, flag)
+                                      else pure t
 
                           --   /* Store the results for Haskell */
                           s <- get
