@@ -387,6 +387,21 @@ solveC CConsts {..} CVars {..} log_env =
                                   pure (record_events, stop_solver, do_reinit)
                                 else pure (0, 0, 0)
 
+                            when (do_reinit > 0) $ do
+                              debug ("Re-initializing the system")
+
+                              -- Before reinit, we get the diagnostics and update the current diagnostics
+                              state <- get
+                              diagnostics <- liftIO $ getDiagnosticsCallback state
+                              put $ state {current_diagnostics = diagnostics}
+
+                              if not implicit
+                                then do
+                                  liftIO $ cARKStepReInit mem c_rhs nullFunPtr t y >>= check 1576
+                                else do
+                                  liftIO $ cARKStepReInit mem nullFunPtr c_rhs t y >>= check 1576
+                              modify $ \s -> s {nb_reinit = nb_reinit s + 1}
+
                             if record_events /= 0
                               then do
                                 debug ("Recording events")
@@ -431,22 +446,6 @@ solveC CConsts {..} CVars {..} log_env =
                               debug ("Stopping the hmatrix-sundials solver as requested")
                               s <- get
                               liftIO $ throwIO $ Finish s
-
-                            when (do_reinit > 0) $ do
-                              debug ("Re-initializing the system")
-
-                              -- Before reinit, we get the diagnostics and update the current diagnostics
-                              state <- get
-                              diagnostics <- liftIO $ getDiagnosticsCallback state
-                              put $ state {current_diagnostics = diagnostics}
-
-                              if not implicit
-                                then do
-                                  liftIO $ cARKStepReInit mem c_rhs nullFunPtr t y >>= check 1576
-                                else do
-                                  liftIO $ cARKStepReInit mem nullFunPtr c_rhs t y >>= check 1576
-                              modify $ \s -> s {nb_reinit = nb_reinit s + 1}
-
                           when (t == ti) $ do
                             modify $ \s -> s {input_ind = s.input_ind + 1}
                             s <- get
