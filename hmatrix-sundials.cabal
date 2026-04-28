@@ -43,6 +43,9 @@ library
                        Numeric.Sundials.IDA
                        Numeric.Sundials.Foreign
                        Numeric.Sundials.Bindings.Sundials
+                       Numeric.Sundials.Bindings.CVode
+                       Numeric.Sundials.Bindings.IDA
+                       Numeric.Sundials.Bindings.ARKode
   default-language:    Haskell2010
   default-extensions:  NondecreasingIndentation
                        LambdaCase
