@@ -167,10 +167,11 @@ solveC CConsts {..} CVars {..} log_env =
                     when (c_jac_set /= 0) $ do
                       cIDASetJacFn mem c_jac_ida >>= check 3124
 
+                    first_time_event <- liftIO c_next_time_event
+
                     VS.imapM_ (\i v -> cNV_Ith_S ids i v) c_is_differential
                     cIDASetId mem ids >>= check 6789
 
-                    first_time_event <- liftIO c_next_time_event
                     -- if any of the value is algebraic, we try to setup the initial condition
                     when (VS.any (== 0.0) c_is_differential) $ do
                       let ti = fromMaybe (error "Incorrect c_sol_time access") $ c_sol_time VS.!? 1

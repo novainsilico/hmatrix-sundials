@@ -222,6 +222,8 @@ solveC CConsts {..} CVars {..} log_env =
                     when (c_jac_set /= 0 && implicit) $ do
                       cARKodeSetJacFn mem c_jac >>= check 3124
 
+                    first_time_event <- liftIO c_next_time_event
+
                     -- /* Store initial conditions */
                     VSM.write c_output_mat (0 * (fromIntegral c_dim + 1) + 0) (c_sol_time VS.! 0)
                     let go j
@@ -239,11 +241,9 @@ solveC CConsts {..} CVars {..} log_env =
                       else do
                         cARKStepSetTableNum mem (-1) c_method >>= check 26643
 
-                    let loop = do
+                    let loop next_time_event = do
                           s <- get
                           let ti = fromMaybe (error "Incorrect c_sol_time access") $ c_sol_time VS.!? s.input_ind
-
-                          next_time_event <- liftIO c_next_time_event
 
                           --   // Haskell failure in the next time event function
                           when (next_time_event == -1) $ do
@@ -454,8 +454,10 @@ solveC CConsts {..} CVars {..} log_env =
                               liftIO $ throwIO $ Finish s
 
                           modify $ \s -> s {t_start = t}
-                          loop
-                    execStateT loop init_loop
+
+                          next_time_event <- liftIO c_next_time_event
+                          loop next_time_event
+                    execStateT (loop first_time_event) init_loop
 
 getDiagnostics :: (SolverObject ARKode) -> CInt -> CInt -> LoopState -> IO SundialsDiagnostics
 getDiagnostics cvode_mem c_method c_n_event_specs loopState = do

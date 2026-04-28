@@ -42,7 +42,7 @@ foreign import ccall "CVodeSetInitStep" cCVodeSetInitStep :: (SolverObject CVode
 
 foreign import ccall "CVode" cCVode :: (SolverObject CVode) -> CDouble -> N_Vector -> Ptr CDouble -> CInt -> IO (Flag CVode)
 
-foreign import ccall "CVodeReInit" cCVodeReInit :: (SolverObject CVode) -> CDouble -> N_Vector -> IO ()
+foreign import ccall "CVodeReInit" cCVodeReInit :: (SolverObject CVode) -> CDouble -> N_Vector -> IO (Flag CVode)
 
 foreign import ccall "CVodeGetRootInfo" cCVodeGetRootInfo :: (SolverObject CVode) -> Ptr CInt -> IO (Flag CVode)
 
