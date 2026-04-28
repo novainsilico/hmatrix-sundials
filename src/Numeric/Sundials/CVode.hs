@@ -5,6 +5,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
+{-# LANGUAGE DataKinds #-}
 
 -- | Solution of ordinary differential equation (ODE) initial value problems.
 --
@@ -70,7 +71,7 @@ solveC CConsts {..} CVars {..} log_env =
                         event_ind = 0,
                         -- /* t_start tracks the starting point of the integration in order to detect
                         --    empty integration interval and avoid a potential infinite loop;
-                        --    see Note [CV_TOO_CLOSE]. Unlike T0, t_start is updated every time we
+                        --    see Note [#TOO_CLOSE]. Unlike T0, t_start is updated every time we
                         --    restart the solving after handling (or not) an event, or emitting
                         --    a requested time point.
                         --    Why not just look for the last recorded time in c_output_mat? Because
@@ -103,7 +104,7 @@ solveC CConsts {..} CVars {..} log_env =
               VS.imapM_ (\i v -> cNV_Ith_S y i v) c_init_cond
 
               -- // NB: Uses the Newton solver by default
-              withCVodeMem c_method sunctx 8396 $ \cvode_mem -> handleTermination CV_SUCCESS (getDiagnostics cvode_mem) $ do
+              withCVodeMem c_method sunctx 8396 $ \cvode_mem -> handleTermination @CVode #SUCCESS (getDiagnostics cvode_mem) $ do
                 let getDiagnosticsCallback loopState = getDiagnostics cvode_mem loopState
                 cCVodeInit cvode_mem c_rhs t0 y >>= check 1960
 
@@ -200,44 +201,44 @@ solveC CConsts {..} CVars {..} log_env =
                           debug $ printf "Main loop iteration: t = %.17g (%a), next time point (ti) = %.17g, next time event = %.17g" (coerce s.t_start :: Double) (coerce ti :: Double) (coerce next_time_event :: Double)
                           (t, flag) <- liftIO $ alloca $ \t_ptr -> do
                             flag <- cCVode cvode_mem next_stop_time y t_ptr CV_NORMAL
-                            -- When CV_TOO_CLOSE, the solver does not make any progress and does not update t_ptr
+                            -- When #TOO_CLOSE, the solver does not make any progress and does not update t_ptr
                             -- See https://github.com/llnl/sundials/issues/840
                             current_t <-
-                              if flag == CV_TOO_CLOSE
+                              if flag == #TOO_CLOSE
                                 then pure $ s.t_start
                                 else peek t_ptr
                             pure (current_t, flag)
 
-                          debug $ printf "CVode returned %d; now t = %.17g\n" (fromIntegral flag :: Int) (coerce t :: Double)
-                          let root_based_event = flag == CV_ROOT_RETURN
+                          debug $ printf "CVode returned %d; now t = %.17g\n" (let Flag v = flag in (fromIntegral v :: Int)) (coerce t :: Double)
+                          let root_based_event = flag == #ROOT_RETURN
                               time_based_event = t == next_time_event
                           t <-
-                            if flag == CV_TOO_CLOSE && not time_based_event
+                            if flag == #TOO_CLOSE && not time_based_event
                               then do
-                                --     /* See Note [CV_TOO_CLOSE]
+                                --     /* See Note [#TOO_CLOSE]
                                 --        No solving was required; just set the time t manually and continue
                                 --        as if solving succeeded. */
-                                debug $ printf "Got CV_TOO_CLOSE; no solving was required; proceeding to t = %.17g" (coerce next_stop_time :: Double)
+                                debug $ printf "Got #TOO_CLOSE; no solving was required; proceeding to t = %.17g" (coerce next_stop_time :: Double)
                                 pure next_stop_time
                               else do
                                 s <- get
-                                if t == next_stop_time && t == s.t_start && flag == CV_ROOT_RETURN && not time_based_event
+                                if t == next_stop_time && t == s.t_start && flag == #ROOT_RETURN && not time_based_event
                                   then do
-                                    --     /* See Note [CV_TOO_CLOSE]
+                                    --     /* See Note [#TOO_CLOSE]
                                     --        Probably the initial step size was set, and that's why we didn't
-                                    --        get CV_TOO_CLOSE.
+                                    --        get #TOO_CLOSE.
                                     --        Pretend that the root didn't happen, lest we keep handling it
                                     --        forever. */
                                     debug $ ("Got a root but t == t_start == next_stop_time; pretending it didn't happen" :: String)
                                     pure t
                                   else do
-                                    if not (flag == CV_TOO_CLOSE && time_based_event) && flag < 0
+                                    if not (flag == #TOO_CLOSE && time_based_event) && isNegative flag
                                       then do
                                         liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \ele -> do
                                           liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \weights -> do
                                             local_errors_flag <- liftIO $ cCVodeGetEstLocalErrors cvode_mem ele
                                             error_weights_flag <- liftIO $ cCVodeGetErrWeights cvode_mem weights
-                                            when (local_errors_flag == CV_SUCCESS && error_weights_flag == CV_SUCCESS) $ do
+                                            when (local_errors_flag == #SUCCESS && error_weights_flag == #SUCCESS) $ do
                                               let go ix destination source
                                                     | ix == c_dim = pure ()
                                                     | otherwise = do
@@ -248,7 +249,7 @@ solveC CConsts {..} CVars {..} log_env =
                                               go 0 c_var_weight =<< cN_VGetArrayPointer weights
 
                                               VSM.write c_local_error_set 0 1
-                                            liftIO $ throwIO $ ReturnCode (fromIntegral flag)
+                                            liftIO $ throwIO $ ReturnCode (let Flag v = flag in fromIntegral v)
                                       else pure t
 
                           --   /* Store the results for Haskell */
@@ -286,7 +287,7 @@ solveC CConsts {..} CVars {..} log_env =
                                   debug ("Handling root-based events")
                                   liftIO $ VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
                                     flag <- cCVodeGetRootInfo cvode_mem c_root_info_ptr
-                                    when (flag < 0) $ do
+                                    when (isNegative flag) $ do
                                       throwIO $ ReturnCode 2829
                                     let go i n_events_triggered
                                           | i >= c_n_event_specs = pure n_events_triggered
@@ -449,7 +450,7 @@ getDiagnostics cvode_mem loopState = do
 
 --  |]
 
-{- Note [CV_TOO_CLOSE]
+{- Note [#TOO_CLOSE]
    ~~~~~~~~~~~~~~~~~~~
    One edge condition that may occur is that an event time may exactly
    coincide with a solving time (e.g. they are both exactly equal to an
@@ -460,19 +461,19 @@ getDiagnostics cvode_mem loopState = do
    * We restart Sundials with the tout being equal to the next solving time,
      which also happens to be equal t1.
    * Sundials sees that the start and end solving times are equal, and
-     returns the CV_TOO_CLOSE error.
+     returns the #TOO_CLOSE error.
 
    Calculating on our side when the start and end times are "too close" by
    Sundials standards is a bit complicated (see the code at the beginning
    of the cvHin function). It's much easier just to call Sundials and
    handle the error.
 
-   For that, however, we need to make sure we ignore CV_TOO_CLOSE in our
+   For that, however, we need to make sure we ignore #TOO_CLOSE in our
    error handler so as not to confuse the end users with mysterious error
    messages in the logs.
 
-   That said, we can't always rely on CV_TOO_CLOSE. When the initial step
-   size is set, cvHin is not called, and CV_TOO_CLOSE is not triggered.
+   That said, we can't always rely on #TOO_CLOSE. When the initial step
+   size is set, cvHin is not called, and #TOO_CLOSE is not triggered.
    Therefore we also add an explicit check to avoid an infinite loop of
    integrating over an empty interval.
 
@@ -483,9 +484,9 @@ getDiagnostics cvode_mem loopState = do
    later time.
 -}
 
-check :: (HasCallStack) => Int -> CInt -> IO ()
+check :: (HasCallStack) => Int -> Flag CVode -> IO ()
 check retCode status
-  | status == CV_SUCCESS = pure ()
+  | status == #SUCCESS = pure ()
   | otherwise = throwIO (ReturnCode retCode)
 
 withCVodeMem :: (HasCallStack) => CInt -> SUNContext -> Int -> (CVodeMem -> IO a) -> IO a
@@ -499,10 +500,10 @@ withCVodeMem method suncontext errCode f = do
         with p cCVodeFree
   bracket create destroy f
 
-cvGet :: (HasCallStack) => (Storable b) => (CVodeMem -> Ptr b -> IO CInt) -> CVodeMem -> IO b
+cvGet :: (HasCallStack) => (Storable b) => (CVodeMem -> Ptr b -> IO (Flag CVode)) -> CVodeMem -> IO b
 cvGet getter cvode_mem = do
   alloca $ \ptr -> do
     err <- getter cvode_mem ptr
-    when (err /= CV_SUCCESS) $ do
+    when (err /= #SUCCESS) $ do
       error $ "Failure during cvGet"
     peek ptr

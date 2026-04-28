@@ -1,5 +1,8 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 -- | This module contains most bindings relevant to sundial and utilities
 -- (matrix, vector) which are used by all solvers.
@@ -258,8 +261,9 @@ All the call are marked (implicitly) as "safe" because they can, in theory, all 
 -- - The semantic of 'ReturnCode' is ugly and comes from the old C loop
 -- - The function is not exception safe and can actually (may, may not, who
 -- really know) raise other exceptions which are not documented.
-handleTermination :: CInt -> (LoopState -> IO SundialsDiagnostics) -> IO LoopState -> IO (CInt, SundialsDiagnostics)
-handleTermination success getDiagnostics action = do
+handleTermination :: Flag impl -> (LoopState -> IO SundialsDiagnostics) -> IO LoopState -> IO (CInt, SundialsDiagnostics)
+handleTermination successFlag getDiagnostics action = do
+  let Flag success = successFlag
   let end finalState = do
         diagnostics <- getDiagnostics finalState
         pure (success, diagnostics)
@@ -275,3 +279,21 @@ handleTermination success getDiagnostics action = do
     Right finalState -> end finalState
     Left (Break finalState) -> end finalState
     Left (Finish finalState) -> end finalState
+
+-- | Represents a return flag from the API call
+--
+-- It is homogenous to a 'CInt', so can be safely converted with foreign, and
+-- does have an 'Eq' instance so it can be compared with other flags.
+--
+-- The different "generic" flags values are implemented as 'IsLabel' instances
+-- in the different binding logics.
+--
+-- Each solver implementation must tag the flag with the relevant tag so they
+-- cannot be mixed.
+newtype Flag k = Flag CInt
+  deriving newtype (Eq)
+
+-- | Return 'True' if the flag represents an unrecoverable failure (e.g.
+-- negative value)
+isNegative :: Flag k -> Bool
+isNegative (Flag i) = i < 0

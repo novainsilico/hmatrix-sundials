@@ -5,6 +5,8 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 -- |
 -- Solution of ordinary differential equation (ODE) initial value problems.
@@ -156,7 +158,7 @@ solveC CConsts {..} CVars {..} log_env =
               let withArkStep
                     | not implicit = \c_rhs -> withARKStepCreate c_rhs nullFunPtr
                     | otherwise = \c_rhs -> withARKStepCreate nullFunPtr c_rhs
-              withArkStep c_rhs t0 y sunctx 8396 $ \cvode_mem -> handleTermination ARK_SUCCESS (getDiagnostics cvode_mem c_method c_n_event_specs) $ do
+              withArkStep c_rhs t0 y sunctx 8396 $ \cvode_mem -> handleTermination @ARKode  #SUCCESS (getDiagnostics cvode_mem c_method c_n_event_specs) $ do
                 let getDiagnosticsCallback state = getDiagnostics cvode_mem c_method c_n_event_specs state
                 -- /* Set the error handler */
                 setErrorHandler sunctx c_report_error
@@ -260,29 +262,29 @@ solveC CConsts {..} CVars {..} log_env =
                           (t, flag) <- liftIO $ alloca $ \t_ptr -> do
                             flag <- cARKodeEvolve cvode_mem next_stop_time y t_ptr ARK_NORMAL
 
-                            -- When ARK_TOO_CLOSE, the solver do not make any progress
+                            -- When #TOO_CLOSE, the solver do not make any progress
                             -- and does not update t_ptr
                             -- See https://github.com/llnl/sundials/issues/840
                             currentT <-
-                              if flag == ARK_TOO_CLOSE
+                              if flag == #TOO_CLOSE
                                 then pure s.t_start
                                 else peek t_ptr
                             pure (currentT, flag)
 
-                          debug $ printf "ARKode returned %d; now t = %.17g\n" (fromIntegral flag :: Int) (coerce t :: Double)
-                          let root_based_event = flag == ARK_ROOT_RETURN
+                          debug $ printf "ARKode returned %d; now t = %.17g\n" (let Flag v = flag in fromIntegral v :: Int) (coerce t :: Double)
+                          let root_based_event = flag == #ROOT_RETURN
                           let time_based_event = t == next_time_event
                           t <-
-                            if flag == ARK_TOO_CLOSE && not time_based_event
+                            if flag == #TOO_CLOSE && not time_based_event
                               then do
                                 --     /* See Note [CV_TOO_CLOSE]
                                 --        No solving was required; just set the time t manually and continue
                                 --        as if solving succeeded. */
-                                debug $ printf "Got ARK_TOO_CLOSE; no solving was required; proceeding to t = %.17g" (coerce next_stop_time :: Double)
+                                debug $ printf "Got #TOO_CLOSE; no solving was required; proceeding to t = %.17g" (coerce next_stop_time :: Double)
                                 pure next_stop_time
                               else do
                                 s <- get
-                                if t == next_stop_time && t == s.t_start && flag == ARK_ROOT_RETURN && not time_based_event
+                                if t == next_stop_time && t == s.t_start && flag == #ROOT_RETURN && not time_based_event
                                   then do
                                     --     /* See Note [CV_TOO_CLOSE]
                                     --        Probably the initial step size was set, and that's why we didn't
@@ -292,13 +294,13 @@ solveC CConsts {..} CVars {..} log_env =
                                     debug $ ("Got a root but t == t_start == next_stop_time; pretending it didn't happen" :: String)
                                     pure t
                                   else do
-                                    if not (flag == ARK_TOO_CLOSE && time_based_event) && flag < 0
+                                    if not (flag == #TOO_CLOSE && time_based_event) && isNegative flag
                                       then do
                                         liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \ele -> do
                                           liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \weights -> do
                                             local_errors_flag <- liftIO $ cARKodeGetEstLocalErrors cvode_mem ele
                                             error_weights_flag <- liftIO $ cARKodeGetErrWeights cvode_mem weights
-                                            when (local_errors_flag == ARK_SUCCESS && error_weights_flag == ARK_SUCCESS) $ do
+                                            when (local_errors_flag == #SUCCESS && error_weights_flag == #SUCCESS) $ do
                                               let go ix destination source
                                                     | ix == c_dim = pure ()
                                                     | otherwise = do
@@ -309,7 +311,7 @@ solveC CConsts {..} CVars {..} log_env =
                                               go 0 c_var_weight =<< cN_VGetArrayPointer weights
 
                                               VSM.write c_local_error_set 0 1
-                                            liftIO $ throwIO $ ReturnCode (fromIntegral flag)
+                                            liftIO $ throwIO $ ReturnCode (let Flag v = flag in fromIntegral v)
                                       else pure t
 
                           --   /* Store the results for Haskell */
@@ -347,7 +349,7 @@ solveC CConsts {..} CVars {..} log_env =
                                   debug ("Handling root-based events")
                                   liftIO $ VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
                                     flag <- cARKodeGetRootInfo cvode_mem c_root_info_ptr
-                                    when (flag < 0) $ do
+                                    when (isNegative flag) $ do
                                       throwIO $ ReturnCode 2829
                                     let go i n_events_triggered
                                           | i >= c_n_event_specs = pure n_events_triggered
@@ -470,7 +472,7 @@ getDiagnostics cvode_mem c_method c_n_event_specs loopState = do
   (nfe, nfi) <- alloca $ \nfe -> do
     alloca $ \nfi -> do
       errCode <- cARKStepGetNumRhsEvals cvode_mem nfe nfi
-      when (errCode /= ARK_SUCCESS) $ do
+      when (errCode /= #SUCCESS) $ do
         error $ "Failure during nfe/nfi get"
 
       (,) <$> peek nfe <*> peek nfi
@@ -561,9 +563,9 @@ getDiagnostics cvode_mem c_method c_n_event_specs loopState = do
    later time.
 -}
 
-check :: (HasCallStack) => Int -> CInt -> IO ()
+check :: (HasCallStack) => Int -> Flag ARKode -> IO ()
 check retCode status
-  | status == ARK_SUCCESS = pure ()
+  | status == #SUCCESS = pure ()
   | otherwise = throwIO (ReturnCode retCode)
 
 withARKStepCreate ::
@@ -587,11 +589,10 @@ withARKStepCreate explicit implicit t0 y0 sunctx errCode f = do
         with p cARKStepFree
   bracket create destroy f
 
-cvGet :: (HasCallStack) => (Storable b) => (ARKodeMem -> Ptr b -> IO CInt) -> ARKodeMem -> IO b
+cvGet :: (HasCallStack) => (Storable b) => (ARKodeMem -> Ptr b -> IO (Flag ARKode)) -> ARKodeMem -> IO b
 cvGet getter cvode_mem = do
   alloca $ \ptr -> do
     err <- getter cvode_mem ptr
-    when (err /= ARK_SUCCESS) $ do
+    when (err /= #SUCCESS) $ do
       error $ "Failure during cvGet"
     peek ptr
-

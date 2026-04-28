@@ -70,7 +70,7 @@ solveC CConsts {..} CVars {..} log_env =
                         event_ind = 0,
                         -- /* t_start tracks the starting point of the integration in order to detect
                         --    empty integration interval and avoid a potential infinite loop;
-                        --    see Note [IDA_TOO_CLOSE]. Unlike T0, t_start is updated every time we
+                        --    see Note [#TOO_CLOSE]. Unlike T0, t_start is updated every time we
                         --    restart the solving after handling (or not) an event, or emitting
                         --    a requested time point.
                         --    Why not just look for the last recorded time in c_output_mat? Because
@@ -103,7 +103,7 @@ solveC CConsts {..} CVars {..} log_env =
               VS.imapM_ (\i v -> cNV_Ith_S y i v) c_init_cond
               VS.imapM_ (\i v -> cNV_Ith_S yp i v) c_init_differentials
 
-              withIDACreate sunctx 8396 $ \ida_mem -> handleTermination IDA_SUCCESS (getDiagnostics ida_mem) $ do
+              withIDACreate sunctx 8396 $ \ida_mem -> handleTermination @IDA #SUCCESS (getDiagnostics ida_mem) $ do
                 let getDiagnosticsCallback state = getDiagnostics ida_mem state
                 cIDAInit ida_mem c_ida_res t0 y yp >>= check 1234
                 -- /* Set the error handler */
@@ -175,7 +175,7 @@ solveC CConsts {..} CVars {..} log_env =
                     when (VS.any (== 0.0) c_is_differential) $ do
                       let ti = fromMaybe (error "Incorrect c_sol_time access") $ c_sol_time VS.!? 1
                       res <- cIDACalcIC ida_mem IDA_YA_YDP_INIT (if first_time_event > t0 && not (isInfinite first_time_event) then first_time_event else ti)
-                      when (res /= IDA_SUCCESS) $ check (fromIntegral res) res
+                      when (res /= #SUCCESS) $ check (let Flag v = res in fromIntegral v) res
 
                       -- Update the initial vector with meaningful values
                       -- Note: this is surprising that IDA does not seem to
@@ -217,11 +217,11 @@ solveC CConsts {..} CVars {..} log_env =
                             (flag, currentT) <- liftIO $ alloca $ \t_ptr -> do
                               flag <- cIDASolve ida_mem next_stop_time t_ptr y yp IDA_NORMAL
 
-                              -- When IDA_TOO_CLOSE, the solver do not make any progress
+                              -- When #TOO_CLOSE, the solver do not make any progress
                               -- and does not update t_ptr
                               -- See https://github.com/llnl/sundials/issues/840
                               currentT <-
-                                if flag == IDA_TOO_CLOSE
+                                if flag == #TOO_CLOSE
                                   then pure s.t_start
                                   else peek t_ptr
                               pure (flag, currentT)
@@ -245,15 +245,15 @@ solveC CConsts {..} CVars {..} log_env =
                             -- This is not a perfect solution, but it can solve
                             -- without "too much" errors a few difficult
                             -- problems.
-                            if flag == IDA_ERR_FAIL
-                              || flag == IDA_CONV_FAIL
-                              || flag == IDA_TOO_MUCH_WORK
+                            if flag == Flag IDA_ERR_FAIL
+                              || flag == Flag IDA_CONV_FAIL
+                              || flag == Flag IDA_TOO_MUCH_WORK
                               -- Sometime we find a root and do not advance.
                               -- We'll just try to switch to the next step
                               -- See next message with " pretending it didn't
                               -- happen", it seems that this problem was
                               -- already solved for CVode in some ways
-                              || (flag == IDA_ROOT_RETURN && currentT == s.t_start)
+                              || (flag == #ROOT_RETURN && currentT == s.t_start)
                               then do
                                 -- We need to go past the discontinuity, so add
                                 -- a small offset to the current time
@@ -286,36 +286,36 @@ solveC CConsts {..} CVars {..} log_env =
                               else
                                 pure (flag, currentT)
 
-                          debug $ printf "IDASolve returned %d; now t = %.17g\n" (fromIntegral flag :: Int) (coerce t :: Double)
-                          let root_based_event = flag == IDA_ROOT_RETURN
+                          debug $ printf "IDASolve returned %d; now t = %.17g\n" (let Flag v = flag in fromIntegral v :: Int) (coerce t :: Double)
+                          let root_based_event = flag == #ROOT_RETURN
                           let time_based_event = t == next_time_event
                           t <-
-                            if flag == IDA_TOO_CLOSE && not time_based_event
+                            if flag == #TOO_CLOSE && not time_based_event
                               then do
-                                --     /* See Note [IDA_TOO_CLOSE]
+                                --     /* See Note [#TOO_CLOSE]
                                 --        No solving was required; just set the time t manually and continue
                                 --        as if solving succeeded. */
-                                debug $ printf "Got IDA_TOO_CLOSE; no solving was required; proceeding to t = %.17g" (coerce next_stop_time :: Double)
+                                debug $ printf "Got #TOO_CLOSE; no solving was required; proceeding to t = %.17g" (coerce next_stop_time :: Double)
                                 pure next_stop_time
                               else do
                                 s <- get
-                                if t == next_stop_time && t == s.t_start && flag == IDA_ROOT_RETURN && not time_based_event
+                                if t == next_stop_time && t == s.t_start && flag == #ROOT_RETURN && not time_based_event
                                   then do
-                                    --     /* See Note [IDA_TOO_CLOSE]
+                                    --     /* See Note [#TOO_CLOSE]
                                     --        Probably the initial step size was set, and that's why we didn't
-                                    --        get IDA_TOO_CLOSE.
+                                    --        get #TOO_CLOSE.
                                     --        Pretend that the root didn't happen, lest we keep handling it
                                     --        forever. */
                                     debug $ ("Got a root but t == t_start == next_stop_time; pretending it didn't happen" :: String)
                                     pure t
                                   else do
-                                    if not (flag == IDA_TOO_CLOSE && time_based_event) && flag < 0
+                                    if not (flag == #TOO_CLOSE && time_based_event) && isNegative flag
                                       then do
                                         liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \ele -> do
                                           liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \weights -> do
                                             local_errors_flag <- liftIO $ cIDAGetEstLocalErrors ida_mem ele
                                             error_weights_flag <- liftIO $ cIDAGetErrWeights ida_mem weights
-                                            when (local_errors_flag == IDA_SUCCESS && error_weights_flag == IDA_SUCCESS) $ do
+                                            when (local_errors_flag == #SUCCESS && error_weights_flag == #SUCCESS) $ do
                                               let go ix destination source
                                                     | ix == c_dim = pure ()
                                                     | otherwise = do
@@ -326,7 +326,7 @@ solveC CConsts {..} CVars {..} log_env =
                                               go 0 c_var_weight =<< cN_VGetArrayPointer weights
 
                                               VSM.write c_local_error_set 0 1
-                                            liftIO $ throwIO (ReturnCode (fromIntegral flag))
+                                            liftIO $ throwIO (ReturnCode (let Flag v = flag in fromIntegral v))
                                       else pure t
 
                           --   /* Store the results for Haskell */
@@ -563,7 +563,7 @@ getDiagnostics cvode_mem loopState = do
 
 --  |]
 
-{- Note [IDA_TOO_CLOSE]
+{- Note [#TOO_CLOSE]
    ~~~~~~~~~~~~~~~~~~~
    One edge condition that may occur is that an event time may exactly
    coincide with a solving time (e.g. they are both exactly equal to an
@@ -574,19 +574,19 @@ getDiagnostics cvode_mem loopState = do
    * We restart Sundials with the tout being equal to the next solving time,
      which also happens to be equal t1.
    * Sundials sees that the start and end solving times are equal, and
-     returns the IDA_TOO_CLOSE error.
+     returns the #TOO_CLOSE error.
 
    Calculating on our side when the start and end times are "too close" by
    Sundials standards is a bit complicated (see the code at the beginning
    of the cvHin function). It's much easier just to call Sundials and
    handle the error.
 
-   For that, however, we need to make sure we ignore IDA_TOO_CLOSE in our
+   For that, however, we need to make sure we ignore #TOO_CLOSE in our
    error handler so as not to confuse the end users with mysterious error
    messages in the logs.
 
-   That said, we can't always rely on IDA_TOO_CLOSE. When the initial step
-   size is set, cvHin is not called, and IDA_TOO_CLOSE is not triggered.
+   That said, we can't always rely on #TOO_CLOSE. When the initial step
+   size is set, cvHin is not called, and #TOO_CLOSE is not triggered.
    Therefore we also add an explicit check to avoid an infinite loop of
    integrating over an empty interval.
 
@@ -597,9 +597,9 @@ getDiagnostics cvode_mem loopState = do
    later time.
 -}
 
-check :: (HasCallStack) => Int -> CInt -> IO ()
+check :: (HasCallStack) => Int -> Flag IDA -> IO ()
 check retCode status
-  | status == IDA_SUCCESS = pure ()
+  | status == #SUCCESS = pure ()
   | otherwise = throwIO (ReturnCode retCode)
 
 withIDACreate ::
@@ -633,10 +633,10 @@ idaReInit ida_mem t y yp = do
   modify $ \s -> s {nb_reinit = nb_reinit s + 1}
 
 
-cvGet :: (HasCallStack) => (Storable b) => (IDAMem -> Ptr b -> IO CInt) -> IDAMem -> IO b
+cvGet :: (HasCallStack) => (Storable b) => (IDAMem -> Ptr b -> IO (Flag IDA)) -> IDAMem -> IO b
 cvGet getter cvode_mem = do
   alloca $ \ptr -> do
     err <- getter cvode_mem ptr
-    when (err /= IDA_SUCCESS) $ do
+    when (err /= #SUCCESS) $ do
       error $ "Failure during cvGet"
     peek ptr

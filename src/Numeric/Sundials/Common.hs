@@ -1,4 +1,6 @@
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
+{-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE DataKinds #-}
 
 -- | Common infrastructure for CVode/ARKode
 module Numeric.Sundials.Common where
