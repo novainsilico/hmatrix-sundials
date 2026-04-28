@@ -214,7 +214,7 @@ assembleSolverResult OdeProblem {..} (ret, diagnostics) CVars {..} = do
           then (mempty, mempty)
           else (VS.unsafeCoerceVector c_local_error, VS.unsafeCoerceVector c_var_weight)
   return $
-    if ret == T.cV_SUCCESS
+    if ret == CV_SUCCESS
       then
         Right $
           SundialsSolution
@@ -303,7 +303,7 @@ cstringToText = fmap T.decodeUtf8 . BS.packCString
 reportErrorWithKatip :: LogEnv -> ReportErrorFn
 reportErrorWithKatip log_env err_code c_mod_name c_func_name c_msg _userdata = do
   -- See Note [CV_TOO_CLOSE]
-  if err_code == T.cV_TOO_CLOSE
+  if err_code == CV_TOO_CLOSE
     then pure ()
     else do
       let
