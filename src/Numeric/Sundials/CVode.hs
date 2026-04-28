@@ -203,20 +203,25 @@ solveC CConsts {..} CVars {..} log_env =
                           debug $ printf "Main loop iteration: t = %.17g (%a), next time point (ti) = %.17g, next time event = %.17g" (coerce s.t_start :: Double) (coerce ti :: Double) (coerce next_time_event :: Double)
                           (t, flag) <- liftIO $ alloca $ \t_ptr -> do
                             flag <- cCVode cvode_mem next_stop_time y t_ptr CV_NORMAL
-                            t <- peek t_ptr
-                            pure (t, flag)
+                            -- When CV_TOO_CLOSE, the solver does not make any progress and does not update t_ptr
+                            -- See https://github.com/llnl/sundials/issues/840
+                            current_t <-
+                              if flag == CV_TOO_CLOSE
+                                then pure $ s.t_start
+                                else peek t_ptr
+                            pure (current_t, flag)
 
                           debug $ printf "CVode returned %d; now t = %.17g\n" (fromIntegral flag :: Int) (coerce t :: Double)
                           let root_based_event = flag == CV_ROOT_RETURN
-                          let time_based_event = t == next_time_event
-                          (t, _flag) <-
+                              time_based_event = t == next_time_event
+                          t <-
                             if flag == CV_TOO_CLOSE && not time_based_event
                               then do
                                 --     /* See Note [CV_TOO_CLOSE]
                                 --        No solving was required; just set the time t manually and continue
                                 --        as if solving succeeded. */
                                 debug $ printf "Got CV_TOO_CLOSE; no solving was required; proceeding to t = %.17g" (coerce next_stop_time :: Double)
-                                pure (next_stop_time, flag)
+                                pure next_stop_time
                               else do
                                 s <- get
                                 if t == next_stop_time && t == s.t_start && flag == CV_ROOT_RETURN && not time_based_event
@@ -227,7 +232,7 @@ solveC CConsts {..} CVars {..} log_env =
                                     --        Pretend that the root didn't happen, lest we keep handling it
                                     --        forever. */
                                     debug $ ("Got a root but t == t_start == next_stop_time; pretending it didn't happen" :: String)
-                                    pure (t, CV_SUCCESS)
+                                    pure t
                                   else do
                                     if not (flag == CV_TOO_CLOSE && time_based_event) && flag < 0
                                       then do
@@ -247,7 +252,7 @@ solveC CConsts {..} CVars {..} log_env =
 
                                               VSM.write c_local_error_set 0 1
                                             liftIO $ throwIO $ ReturnCode (fromIntegral flag)
-                                      else pure (t, flag)
+                                      else pure t
 
                           --   /* Store the results for Haskell */
                           s <- get
