@@ -45,9 +45,6 @@ instance IsMethod IDAMethod where
 
   methodType _ = Implicit
 
-foreign import ccall "wrapper"
-  mkReport :: ReportErrorFnNew -> IO (FunPtr ReportErrorFnNew)
-
 solveC :: CConsts -> CVars (VS.MVector VSM.RealWorld) -> LogEnv -> IO (CInt, SundialsDiagnostics)
 solveC CConsts {..} CVars {..} log_env =
   let report_error_new_api = wrapErrorNewApi (reportErrorWithKatip log_env)

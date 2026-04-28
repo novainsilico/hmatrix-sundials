@@ -94,9 +94,6 @@ instance IsMethod ARKMethod where
       then Explicit
       else Implicit
 
-foreign import ccall "wrapper"
-  mkReport :: ReportErrorFnNew -> IO (FunPtr ReportErrorFnNew)
-
 solveC :: CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO (CInt, SundialsDiagnostics)
 solveC CConsts {..} CVars {..} log_env =
   let report_error_new_api = wrapErrorNewApi (reportErrorWithKatip log_env)

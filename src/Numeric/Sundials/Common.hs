@@ -291,6 +291,9 @@ type ReportErrorFnNew =
   Ptr () -> -- sundial context
   IO ()
 
+foreign import ccall "wrapper"
+  mkReport :: ReportErrorFnNew -> IO (FunPtr ReportErrorFnNew)
+
 wrapErrorNewApi :: ReportErrorFn -> ReportErrorFnNew
 wrapErrorNewApi f _lineNumber functionName moduleName errorMessage errorCode userData _sundialContext = f errorCode moduleName functionName errorMessage userData
 
