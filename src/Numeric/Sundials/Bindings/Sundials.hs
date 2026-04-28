@@ -263,7 +263,7 @@ All the call are marked (implicitly) as "safe" because they can, in theory, all 
 -- really know) raise other exceptions which are not documented.
 handleTermination :: Flag impl -> (LoopState -> IO SundialsDiagnostics) -> IO LoopState -> IO (CInt, SundialsDiagnostics)
 handleTermination successFlag getDiagnostics action = do
-  let Flag success = successFlag
+  let success = getInt successFlag
   let end finalState = do
         diagnostics <- getDiagnostics finalState
         pure (success, diagnostics)
@@ -290,7 +290,7 @@ handleTermination successFlag getDiagnostics action = do
 --
 -- Each solver implementation must tag the flag with the relevant tag so they
 -- cannot be mixed.
-newtype Flag k = Flag CInt
+newtype Flag k = Flag { getInt :: CInt }
   deriving newtype (Eq)
 
 -- | Return 'True' if the flag represents an unrecoverable failure (e.g.

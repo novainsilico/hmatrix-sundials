@@ -209,7 +209,7 @@ solveC CConsts {..} CVars {..} log_env =
                                 else peek t_ptr
                             pure (current_t, flag)
 
-                          debug $ printf "CVode returned %d; now t = %.17g\n" (let Flag v = flag in (fromIntegral v :: Int)) (coerce t :: Double)
+                          debug $ printf "CVode returned %d; now t = %.17g\n" (fromIntegral (getInt flag) :: Int) (coerce t :: Double)
                           let root_based_event = flag == #ROOT_RETURN
                               time_based_event = t == next_time_event
                           t <-
@@ -249,7 +249,7 @@ solveC CConsts {..} CVars {..} log_env =
                                               go 0 c_var_weight =<< cN_VGetArrayPointer weights
 
                                               VSM.write c_local_error_set 0 1
-                                            liftIO $ throwIO $ ReturnCode (let Flag v = flag in fromIntegral v)
+                                            liftIO $ throwIO $ ReturnCode (fromIntegral (getInt flag))
                                       else pure t
 
                           --   /* Store the results for Haskell */

@@ -175,7 +175,7 @@ solveC CConsts {..} CVars {..} log_env =
                     when (VS.any (== 0.0) c_is_differential) $ do
                       let ti = fromMaybe (error "Incorrect c_sol_time access") $ c_sol_time VS.!? 1
                       res <- cIDACalcIC mem IDA_YA_YDP_INIT (if first_time_event > t0 && not (isInfinite first_time_event) then first_time_event else ti)
-                      when (res /= #SUCCESS) $ check (let Flag v = res in fromIntegral v) res
+                      when (res /= #SUCCESS) $ check (fromIntegral (getInt res)) res
 
                       -- Update the initial vector with meaningful values
                       -- Note: this is surprising that IDA does not seem to
@@ -286,7 +286,7 @@ solveC CConsts {..} CVars {..} log_env =
                               else
                                 pure (flag, currentT)
 
-                          debug $ printf "IDASolve returned %d; now t = %.17g\n" (let Flag v = flag in fromIntegral v :: Int) (coerce t :: Double)
+                          debug $ printf "IDASolve returned %d; now t = %.17g\n" (fromIntegral (getInt flag) :: Int) (coerce t :: Double)
                           let root_based_event = flag == #ROOT_RETURN
                           let time_based_event = t == next_time_event
                           t <-
@@ -326,7 +326,7 @@ solveC CConsts {..} CVars {..} log_env =
                                               go 0 c_var_weight =<< cN_VGetArrayPointer weights
 
                                               VSM.write c_local_error_set 0 1
-                                            liftIO $ throwIO (ReturnCode (let Flag v = flag in fromIntegral v))
+                                            liftIO $ throwIO (ReturnCode (fromIntegral (getInt flag)))
                                       else pure t
 
                           --   /* Store the results for Haskell */
