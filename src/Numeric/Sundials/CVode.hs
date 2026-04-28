@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedLabels #-}
@@ -5,11 +6,10 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
-{-# LANGUAGE DataKinds #-}
 
 -- | Solution of ordinary differential equation (ODE) initial value problems.
 --
--- <https://computation.llnl.gov/projects/sundials/sundials-software>
+-- See <https://computation.llnl.gov/projects/sundials/sundials-software> for more detail.
 module Numeric.Sundials.CVode
   ( CVMethod (..),
     solveC,
@@ -29,11 +29,11 @@ import Foreign.C
 import GHC.Generics
 import GHC.Stack
 import Katip
+import Numeric.Sundials.Bindings.CVode
 import Numeric.Sundials.Bindings.Sundials
 import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
 import Text.Printf (printf)
-import Numeric.Sundials.Bindings.CVode
 
 -- | Available methods for CVode
 data CVMethod
@@ -54,7 +54,7 @@ solveC CConsts {..} CVars {..} log_env =
         -- This SPAMs the logging system with a lot of informations, so we do
         -- not enable it by default
         -- Just comment in/out this line for now, we'll think about a nicer solution later
-        -- liftIO (debugMsgWithKatip log_env s)
+        -- liftIO (debugMsgWithKatip log_env _s)
         pure ()
    in do
         -- Allocate the error reporting callback
@@ -112,25 +112,25 @@ solveC CConsts {..} CVars {..} log_env =
                 setErrorHandler sunctx c_report_error
 
                 when (c_fixedstep > 0.0) $ do
-                  throwIO $ ReturnCodeWithMessage "fixedStep cannot be used with CVode" 6426
+                  throwIO $ ReturnCodeWithMessage "fixedStep can only be used with ARKode" 6426
 
                 -- /* Set the user data */
-                cCVodeSetUserData mem c_rhs_userdata >>= check 1949
+                sundialsSetUserData mem c_rhs_userdata >>= check 1949
 
                 -- /* Create serial vector for absolute tolerances */
                 withNVector_Serial c_dim sunctx 6471 $ \tv -> do
                   -- /* Specify tolerances */
                   VS.imapM_ (\i v -> cNV_Ith_S tv i v) c_atol
 
-                  cCVodeSetMinStep mem c_minstep >>= check 6433
+                  sundialsSetMinStep mem c_minstep >>= check 6433
                   case c_maxstep of
-                    Just max_step -> cCVodeSetMaxStep mem max_step >>= check 6434
+                    Just max_step -> sundialsSetMaxStep mem max_step >>= check 6434
                     Nothing -> pure ()
-                  cCVodeSetMaxNumSteps mem c_max_n_steps >>= check 9904
-                  cCVodeSetMaxErrTestFails mem c_max_err_test_fails >>= check 2512
+                  sundialsSetMaxNumSteps mem c_max_n_steps >>= check 9904
+                  sundialsSetMaxErrTestFails mem c_max_err_test_fails >>= check 2512
 
                   -- /* Specify the scalar relative tolerance and vector absolute tolerances */
-                  cCVodeSVtolerances mem c_rtol tv >>= check 6212
+                  sundialsSVtolerances mem c_rtol tv >>= check 6212
 
                   -- /* Specify the root function */
                   when (c_n_event_specs /= 0) $ do
@@ -138,9 +138,9 @@ solveC CConsts {..} CVars {..} log_env =
 
                     -- Set the root direction
                     VS.unsafeWith c_requested_event_direction $ \ptr -> do
-                      cCVodeSetRootDirection mem ptr >>= check 5678909876
+                      sundialsSetRootDirection mem ptr >>= check 5678909876
                     -- /* Disable the inactive roots warning; see https://git.novadiscovery.net/jinko/jinko/-/issues/2368 */
-                    cCVodeSetNoInactiveRootWarn mem >>= check 6291
+                    sundialsSetNoInactiveRootWarn mem >>= check 6291
 
                   -- /* Initialize a jacobian matrix and solver */
                   let withLinearSolver f = do
@@ -149,13 +149,13 @@ solveC CConsts {..} CVars {..} log_env =
                             withSUNSparseMatrix c_dim c_dim c_sparse_jac CSC_MAT sunctx 9061 $ \a -> do
                               withSUNLinSol_KLU y a sunctx 9316 $ \ls -> do
                                 -- /* Attach matrix and linear solver */
-                                cCVodeSetLinearSolver mem ls a >>= check 2625
+                                sundialsSetLinearSolver mem ls a >>= check 2625
                                 f
                           else do
                             withSUNDenseMatrix c_dim c_dim sunctx 9316 $ \a -> do
                               withSUNLinSol_Dense y a sunctx 9316 $ \ls -> do
                                 -- /* Attach matrix and linear solver */
-                                cCVodeSetLinearSolver mem ls a >>= check 2625
+                                sundialsSetLinearSolver mem ls a >>= check 2625
                                 f
 
                   withLinearSolver $ do
@@ -163,7 +163,7 @@ solveC CConsts {..} CVars {..} log_env =
                     when (c_init_step_size_set /= 0) $ do
                       --   /* FIXME: We could check if the initial step size is 0 */
                       --   /* or even NaN and then throw an error                 */
-                      cCVodeSetInitStep mem c_init_step_size >>= check 4010
+                      sundialsSetInitStep mem c_init_step_size >>= check 4010
 
                     -- /* Set the Jacobian if there is one */
                     when (c_jac_set /= 0) $ do
@@ -180,8 +180,7 @@ solveC CConsts {..} CVars {..} log_env =
 
                     c_ontimepoint t0 c_output_mat 0 (getDiagnosticsCallback init_loop)
 
-                    let loop :: StateT LoopState IO ()
-                        loop = do
+                    let loop = do
                           s <- get
                           let ti = fromMaybe (error "Incorrect c_sol_time access") $ c_sol_time VS.!? s.input_ind
 
@@ -209,7 +208,7 @@ solveC CConsts {..} CVars {..} log_env =
                                 else peek t_ptr
                             pure (current_t, flag)
 
-                          debug $ printf "CVode returned %d; now t = %.17g\n" (fromIntegral (getInt flag) :: Int) (coerce t :: Double)
+                          debug $ printf "Step function returned %d; now t = %.17g\n" (fromIntegral (getInt flag) :: Int) (coerce t :: Double)
                           let root_based_event = flag == #ROOT_RETURN
                               time_based_event = t == next_time_event
                           t <-
@@ -236,8 +235,8 @@ solveC CConsts {..} CVars {..} log_env =
                                       then do
                                         liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \ele -> do
                                           liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \weights -> do
-                                            local_errors_flag <- liftIO $ cCVodeGetEstLocalErrors mem ele
-                                            error_weights_flag <- liftIO $ cCVodeGetErrWeights mem weights
+                                            local_errors_flag <- liftIO $ sundialsGetEstLocalErrors mem ele
+                                            error_weights_flag <- liftIO $ sundialsGetErrWeights mem weights
                                             when (local_errors_flag == #SUCCESS && error_weights_flag == #SUCCESS) $ do
                                               let go ix destination source
                                                     | ix == c_dim = pure ()
@@ -249,7 +248,7 @@ solveC CConsts {..} CVars {..} log_env =
                                               go 0 c_var_weight =<< cN_VGetArrayPointer weights
 
                                               VSM.write c_local_error_set 0 1
-                                            liftIO $ throwIO $ ReturnCode (fromIntegral (getInt flag))
+                                            liftIO $ throwIO (ReturnCode (fromIntegral (getInt flag)))
                                       else pure t
 
                           --   /* Store the results for Haskell */
@@ -286,9 +285,7 @@ solveC CConsts {..} CVars {..} log_env =
                                 else do
                                   debug ("Handling root-based events")
                                   liftIO $ VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
-                                    flag <- cCVodeGetRootInfo mem c_root_info_ptr
-                                    when (isNegative flag) $ do
-                                      throwIO $ ReturnCode 2829
+                                    sundialsGetRootInfo mem c_root_info_ptr >>= check 1235
                                     let go i n_events_triggered
                                           | i >= c_n_event_specs = pure n_events_triggered
                                           | otherwise = do
@@ -297,7 +294,7 @@ solveC CConsts {..} CVars {..} log_env =
 
                                               if ev /= 0 && ev * req_dir >= 0
                                                 then do
-                                                  --           /* After the above call to CVodeGetRootInfo, c_root_info has an
+                                                  --           /* After the above call to GetRootInfo, c_root_info has an
                                                   --           entry per EventSpec. Here we reuse the same array but convert it
                                                   --           into one that contains indices of triggered events. */
                                                   --           c_root_info[n_events_triggered++] = i;
@@ -401,29 +398,29 @@ solveC CConsts {..} CVars {..} log_env =
 getDiagnostics :: (SolverObject CVode) -> LoopState -> IO SundialsDiagnostics
 getDiagnostics cvode_mem loopState = do
   -- /* Get some final statistics on how the solve progressed */
-  nst <- cvGet cCVodeGetNumSteps cvode_mem
+  nst <- cvGet sundialsGetNumSteps cvode_mem
 
-  -- /* FIXME */
+  -- This diagnostic is not available
   let nst_a = 0 :: Int
 
   nfe <- cvGet cCVodeGetNumRhsEvals cvode_mem
 
-  -- /* FIXME */
+  -- This diagnostic is not available
   let nfi = 0 :: Int
 
-  nsetups <- cvGet cCVodeGetNumLinSolvSetups cvode_mem
+  nsetups <- cvGet sundialsGetNumLinSolvSetups cvode_mem
 
-  netf <- cvGet cCVodeGetNumErrTestFails cvode_mem
+  netf <- cvGet sundialsGetNumErrTestFails cvode_mem
 
-  nni <- cvGet cCVodeGetNumNonlinSolvIters cvode_mem
+  nni <- cvGet sundialsGetNumNonlinSolvIters cvode_mem
 
-  ncfn <- cvGet cCVodeGetNumNonlinSolvConvFails cvode_mem
+  ncfn <- cvGet sundialsGetNumNonlinSolvConvFails cvode_mem
 
-  nje <- cvGet cCVodeGetNumJacEvals cvode_mem
+  nje <- cvGet sundialsGetNumJacEvals cvode_mem
 
   nfeLS <- cvGet cCVodeGetNumLinRhsEvals cvode_mem
 
-  gevals <- cvGet cCVodeGetNumGEvals cvode_mem
+  gevals <- cvGet sundialsGetNumGEvals cvode_mem
 
   let diagnostics =
         SundialsDiagnostics
@@ -484,11 +481,6 @@ getDiagnostics cvode_mem loopState = do
    later time.
 -}
 
-check :: (HasCallStack) => Int -> Flag CVode -> IO ()
-check retCode status
-  | status == #SUCCESS = pure ()
-  | otherwise = throwIO (ReturnCode retCode)
-
 withCVodeMem :: (HasCallStack) => CInt -> SUNContext -> Int -> ((SolverObject CVode) -> IO a) -> IO a
 withCVodeMem method suncontext errCode f = do
   let create = do
@@ -499,11 +491,3 @@ withCVodeMem method suncontext errCode f = do
       destroy p = do
         with p cCVodeFree
   bracket create destroy f
-
-cvGet :: (HasCallStack) => (Storable b) => ((SolverObject CVode) -> Ptr b -> IO (Flag CVode)) -> (SolverObject CVode) -> IO b
-cvGet getter cvode_mem = do
-  alloca $ \ptr -> do
-    err <- getter cvode_mem ptr
-    when (err /= #SUCCESS) $ do
-      error $ "Failure during cvGet"
-    peek ptr

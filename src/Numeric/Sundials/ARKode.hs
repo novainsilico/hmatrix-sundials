@@ -1,15 +1,15 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 
--- |
--- Solution of ordinary differential equation (ODE) initial value problems.
+-- | Solution of ordinary differential equation (ODE) initial value problems.
+--
 -- See <https://computation.llnl.gov/projects/sundials/sundials-software> for more detail.
 module Numeric.Sundials.ARKode
   ( ARKMethod (..),
@@ -23,7 +23,6 @@ import Control.Monad.State
 import Data.Bool
 import Data.Coerce (coerce)
 import Data.Maybe (fromMaybe)
-import Data.Vector.Mutable (RealWorld)
 import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Storable.Mutable as VSM
 import Foreign
@@ -31,11 +30,11 @@ import Foreign.C
 import GHC.Generics
 import GHC.Stack
 import Katip
+import Numeric.Sundials.Bindings.ARKode
 import Numeric.Sundials.Bindings.Sundials
 import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
 import Text.Printf (printf)
-import Numeric.Sundials.Bindings.ARKode
 
 -- | Available methods for ARKode
 data ARKMethod
@@ -96,7 +95,7 @@ instance IsMethod ARKMethod where
       then Explicit
       else Implicit
 
-solveC :: CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO (CInt, SundialsDiagnostics)
+solveC :: CConsts -> CVars (VS.MVector VSM.RealWorld) -> LogEnv -> IO (CInt, SundialsDiagnostics)
 solveC CConsts {..} CVars {..} log_env =
   let report_error_new_api = wrapErrorNewApi (reportErrorWithKatip (getInt @ARKode #TOO_CLOSE) log_env)
       debug :: String -> StateT LoopState IO ()
@@ -104,7 +103,7 @@ solveC CConsts {..} CVars {..} log_env =
         -- This SPAMs the logging system with a lot of informations, so we do
         -- not enable it by default
         -- Just comment in/out this line for now, we'll think about a nicer solution later
-        -- liftIO (debugMsgWithKatip log_env s)
+        -- liftIO (debugMsgWithKatip log_env _s)
         pure ()
    in do
         -- Allocate the error reporting callback
@@ -121,7 +120,7 @@ solveC CConsts {..} CVars {..} log_env =
                         event_ind = 0,
                         -- /* t_start tracks the starting point of the integration in order to detect
                         --    empty integration interval and avoid a potential infinite loop;
-                        --    see Note [CV_TOO_CLOSE]. Unlike T0, t_start is updated every time we
+                        --    see Note [#TOO_CLOSE]. Unlike T0, t_start is updated every time we
                         --    restart the solving after handling (or not) an event, or emitting
                         --    a requested time point.
                         --    Why not just look for the last recorded time in c_output_mat? Because
@@ -158,7 +157,7 @@ solveC CConsts {..} CVars {..} log_env =
               let withArkStep
                     | not implicit = \c_rhs -> withARKStepCreate c_rhs nullFunPtr
                     | otherwise = \c_rhs -> withARKStepCreate nullFunPtr c_rhs
-              withArkStep c_rhs t0 y sunctx 8396 $ \mem -> handleTermination @ARKode  #SUCCESS (getDiagnostics mem c_method c_n_event_specs) $ do
+              withArkStep c_rhs t0 y sunctx 8396 $ \mem -> handleTermination @ARKode #SUCCESS (getDiagnostics mem c_method c_n_event_specs) $ do
                 let getDiagnosticsCallback state = getDiagnostics mem c_method c_n_event_specs state
                 -- /* Set the error handler */
                 setErrorHandler sunctx c_report_error
@@ -167,22 +166,22 @@ solveC CConsts {..} CVars {..} log_env =
                   cARKodeSetFixedStep mem c_fixedstep
 
                 -- /* Set the user data */
-                cARKodeSetUserData mem c_rhs_userdata >>= check 1949
+                sundialsSetUserData mem c_rhs_userdata >>= check 1949
 
                 -- /* Create serial vector for absolute tolerances */
                 withNVector_Serial c_dim sunctx 6471 $ \tv -> do
                   -- /* Specify tolerances */
                   VS.imapM_ (\i v -> cNV_Ith_S tv i v) c_atol
 
-                  cARKodeSetMinStep mem c_minstep >>= check 6433
+                  sundialsSetMinStep mem c_minstep >>= check 6433
                   case c_maxstep of
-                    Just max_step -> cARKodeSetMaxStep mem max_step >>= check 6434
+                    Just max_step -> sundialsSetMaxStep mem max_step >>= check 6434
                     Nothing -> pure ()
-                  cARKodeSetMaxNumSteps mem c_max_n_steps >>= check 9904
-                  cARKodeSetMaxErrTestFails mem c_max_err_test_fails >>= check 2512
+                  sundialsSetMaxNumSteps mem c_max_n_steps >>= check 9904
+                  sundialsSetMaxErrTestFails mem c_max_err_test_fails >>= check 2512
 
                   -- /* Specify the scalar relative tolerance and vector absolute tolerances */
-                  cARKodeSVtolerances mem c_rtol tv >>= check 6212
+                  sundialsSVtolerances mem c_rtol tv >>= check 6212
 
                   -- /* Specify the root function */
                   when (c_n_event_specs /= 0) $ do
@@ -190,9 +189,9 @@ solveC CConsts {..} CVars {..} log_env =
 
                     -- Set the root direction
                     VS.unsafeWith c_requested_event_direction $ \ptr -> do
-                      cARKodeSetRootDirection mem ptr >>= check 5678909876
+                      sundialsSetRootDirection mem ptr >>= check 5678909876
                     -- /* Disable the inactive roots warning; see https://git.novadiscovery.net/jinko/jinko/-/issues/2368 */
-                    cARKodeSetNoInactiveRootWarn mem >>= check 6291
+                    sundialsSetNoInactiveRootWarn mem >>= check 6291
 
                   -- /* Initialize a jacobian matrix and solver */
                   let withLinearSolver f
@@ -202,13 +201,13 @@ solveC CConsts {..} CVars {..} log_env =
                                 withSUNSparseMatrix c_dim c_dim c_sparse_jac CSC_MAT sunctx 9061 $ \a -> do
                                   withSUNLinSol_KLU y a sunctx 9316 $ \ls -> do
                                     -- /* Attach matrix and linear solver */
-                                    cARKodeSetLinearSolver mem ls a >>= check 2625
+                                    sundialsSetLinearSolver mem ls a >>= check 2625
                                     f
                               else do
                                 withSUNDenseMatrix c_dim c_dim sunctx 9316 $ \a -> do
                                   withSUNLinSol_Dense y a sunctx 9316 $ \ls -> do
                                     -- /* Attach matrix and linear solver */
-                                    cARKodeSetLinearSolver mem ls a >>= check 2625
+                                    sundialsSetLinearSolver mem ls a >>= check 2625
                                     f
                         | otherwise = f
 
@@ -217,7 +216,7 @@ solveC CConsts {..} CVars {..} log_env =
                     when (c_init_step_size_set /= 0) $ do
                       --   /* FIXME: We could check if the initial step size is 0 */
                       --   /* or even NaN and then throw an error                 */
-                      cARKodeSetInitStep mem c_init_step_size >>= check 4010
+                      sundialsSetInitStep mem c_init_step_size >>= check 4010
 
                     -- /* Set the Jacobian if there is one */
                     when (c_jac_set /= 0 && implicit) $ do
@@ -240,8 +239,7 @@ solveC CConsts {..} CVars {..} log_env =
                       else do
                         cARKStepSetTableNum mem (-1) c_method >>= check 26643
 
-                    let loop :: StateT LoopState IO ()
-                        loop = do
+                    let loop = do
                           s <- get
                           let ti = fromMaybe (error "Incorrect c_sol_time access") $ c_sol_time VS.!? s.input_ind
 
@@ -265,19 +263,19 @@ solveC CConsts {..} CVars {..} log_env =
                             -- When #TOO_CLOSE, the solver do not make any progress
                             -- and does not update t_ptr
                             -- See https://github.com/llnl/sundials/issues/840
-                            currentT <-
+                            current_t <-
                               if flag == #TOO_CLOSE
                                 then pure s.t_start
                                 else peek t_ptr
-                            pure (currentT, flag)
+                            pure (current_t, flag)
 
-                          debug $ printf "ARKode returned %d; now t = %.17g\n" (fromIntegral (getInt flag) :: Int) (coerce t :: Double)
+                          debug $ printf "Step function returned %d; now t = %.17g\n" (fromIntegral (getInt flag) :: Int) (coerce t :: Double)
                           let root_based_event = flag == #ROOT_RETURN
-                          let time_based_event = t == next_time_event
+                              time_based_event = t == next_time_event
                           t <-
                             if flag == #TOO_CLOSE && not time_based_event
                               then do
-                                --     /* See Note [CV_TOO_CLOSE]
+                                --     /* See Note [#TOO_CLOSE]
                                 --        No solving was required; just set the time t manually and continue
                                 --        as if solving succeeded. */
                                 debug $ printf "Got #TOO_CLOSE; no solving was required; proceeding to t = %.17g" (coerce next_stop_time :: Double)
@@ -286,9 +284,9 @@ solveC CConsts {..} CVars {..} log_env =
                                 s <- get
                                 if t == next_stop_time && t == s.t_start && flag == #ROOT_RETURN && not time_based_event
                                   then do
-                                    --     /* See Note [CV_TOO_CLOSE]
+                                    --     /* See Note [#TOO_CLOSE]
                                     --        Probably the initial step size was set, and that's why we didn't
-                                    --        get CV_TOO_CLOSE.
+                                    --        get #TOO_CLOSE.
                                     --        Pretend that the root didn't happen, lest we keep handling it
                                     --        forever. */
                                     debug $ ("Got a root but t == t_start == next_stop_time; pretending it didn't happen" :: String)
@@ -298,8 +296,8 @@ solveC CConsts {..} CVars {..} log_env =
                                       then do
                                         liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \ele -> do
                                           liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \weights -> do
-                                            local_errors_flag <- liftIO $ cARKodeGetEstLocalErrors mem ele
-                                            error_weights_flag <- liftIO $ cARKodeGetErrWeights mem weights
+                                            local_errors_flag <- liftIO $ sundialsGetEstLocalErrors mem ele
+                                            error_weights_flag <- liftIO $ sundialsGetErrWeights mem weights
                                             when (local_errors_flag == #SUCCESS && error_weights_flag == #SUCCESS) $ do
                                               let go ix destination source
                                                     | ix == c_dim = pure ()
@@ -311,7 +309,7 @@ solveC CConsts {..} CVars {..} log_env =
                                               go 0 c_var_weight =<< cN_VGetArrayPointer weights
 
                                               VSM.write c_local_error_set 0 1
-                                            liftIO $ throwIO $ ReturnCode (fromIntegral (getInt flag))
+                                            liftIO $ throwIO (ReturnCode (fromIntegral (getInt flag)))
                                       else pure t
 
                           --   /* Store the results for Haskell */
@@ -348,9 +346,7 @@ solveC CConsts {..} CVars {..} log_env =
                                 else do
                                   debug ("Handling root-based events")
                                   liftIO $ VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
-                                    flag <- cARKodeGetRootInfo mem c_root_info_ptr
-                                    when (isNegative flag) $ do
-                                      throwIO $ ReturnCode 2829
+                                    sundialsGetRootInfo mem c_root_info_ptr >>= check 1235
                                     let go i n_events_triggered
                                           | i >= c_n_event_specs = pure n_events_triggered
                                           | otherwise = do
@@ -359,7 +355,7 @@ solveC CConsts {..} CVars {..} log_env =
 
                                               if ev /= 0 && ev * req_dir >= 0
                                                 then do
-                                                  --           /* After the above call to ARKodeGetRootInfo, c_root_info has an
+                                                  --           /* After the above call to GetRootInfo, c_root_info has an
                                                   --           entry per EventSpec. Here we reuse the same array but convert it
                                                   --           into one that contains indices of triggered events. */
                                                   --           c_root_info[n_events_triggered++] = i;
@@ -465,7 +461,7 @@ solveC CConsts {..} CVars {..} log_env =
 getDiagnostics :: (SolverObject ARKode) -> CInt -> CInt -> LoopState -> IO SundialsDiagnostics
 getDiagnostics cvode_mem c_method c_n_event_specs loopState = do
   -- /* Get some final statistics on how the solve progressed */
-  nst <- cvGet cARKodeGetNumSteps cvode_mem
+  nst <- cvGet sundialsGetNumSteps cvode_mem
 
   nst_a <- cvGet cARKodeGetNumStepAttempts cvode_mem
 
@@ -477,19 +473,19 @@ getDiagnostics cvode_mem c_method c_n_event_specs loopState = do
 
       (,) <$> peek nfe <*> peek nfi
 
-  nsetups <- cvGet cARKodeGetNumLinSolvSetups cvode_mem
+  nsetups <- cvGet sundialsGetNumLinSolvSetups cvode_mem
 
-  netf <- cvGet cARKodeGetNumErrTestFails cvode_mem
+  netf <- cvGet sundialsGetNumErrTestFails cvode_mem
 
-  nni <- cvGet cARKodeGetNumNonlinSolvIters cvode_mem
+  nni <- cvGet sundialsGetNumNonlinSolvIters cvode_mem
 
   let implicit = c_method >= ARKODE_MIN_DIRK_NUM
   (ncfn, nje, nfeLS) <-
     if implicit
       then do
-        ncfn <- cvGet cARKodeGetNumNonlinSolvConvFails cvode_mem
+        ncfn <- cvGet sundialsGetNumNonlinSolvConvFails cvode_mem
 
-        nje <- cvGet cARKodeGetNumJacEvals cvode_mem
+        nje <- cvGet sundialsGetNumJacEvals cvode_mem
 
         nfeLS <- cvGet cARKodeGetNumLinRhsEvals cvode_mem
 
@@ -501,7 +497,7 @@ getDiagnostics cvode_mem c_method c_n_event_specs loopState = do
   -- are set
   gevals <-
     if c_n_event_specs /= 0
-      then cvGet cARKodeGetNumGEvals cvode_mem
+      then cvGet sundialsGetNumGEvals cvode_mem
       else pure 0
 
   let diagnostics =
@@ -529,7 +525,7 @@ getDiagnostics cvode_mem c_method c_n_event_specs loopState = do
 
 --  |]
 
-{- Note [CV_TOO_CLOSE]
+{- Note [#TOO_CLOSE]
    ~~~~~~~~~~~~~~~~~~~
    One edge condition that may occur is that an event time may exactly
    coincide with a solving time (e.g. they are both exactly equal to an
@@ -540,19 +536,19 @@ getDiagnostics cvode_mem c_method c_n_event_specs loopState = do
    * We restart Sundials with the tout being equal to the next solving time,
      which also happens to be equal t1.
    * Sundials sees that the start and end solving times are equal, and
-     returns the CV_TOO_CLOSE error.
+     returns the TOO_CLOSE error.
 
    Calculating on our side when the start and end times are "too close" by
    Sundials standards is a bit complicated (see the code at the beginning
    of the cvHin function). It's much easier just to call Sundials and
    handle the error.
 
-   For that, however, we need to make sure we ignore CV_TOO_CLOSE in our
+   For that, however, we need to make sure we ignore TOO_CLOSE in our
    error handler so as not to confuse the end users with mysterious error
    messages in the logs.
 
-   That said, we can't always rely on CV_TOO_CLOSE. When the initial step
-   size is set, cvHin is not called, and CV_TOO_CLOSE is not triggered.
+   That said, we can't always rely on TOO_CLOSE. When the initial step
+   size is set, cvHin is not called, and TOO_CLOSE is not triggered.
    Therefore we also add an explicit check to avoid an infinite loop of
    integrating over an empty interval.
 
@@ -562,11 +558,6 @@ getDiagnostics cvode_mem c_method c_n_event_specs loopState = do
    a time-based event, the next time-based event should be at a strictly
    later time.
 -}
-
-check :: (HasCallStack) => Int -> Flag ARKode -> IO ()
-check retCode status
-  | status == #SUCCESS = pure ()
-  | otherwise = throwIO (ReturnCode retCode)
 
 withARKStepCreate ::
   (HasCallStack) =>
@@ -588,11 +579,3 @@ withARKStepCreate explicit implicit t0 y0 sunctx errCode f = do
       destroy p = do
         with p cARKStepFree
   bracket create destroy f
-
-cvGet :: (HasCallStack) => (Storable b) => ((SolverObject ARKode) -> Ptr b -> IO (Flag ARKode)) -> (SolverObject ARKode) -> IO b
-cvGet getter cvode_mem = do
-  alloca $ \ptr -> do
-    err <- getter cvode_mem ptr
-    when (err /= #SUCCESS) $ do
-      error $ "Failure during cvGet"
-    peek ptr

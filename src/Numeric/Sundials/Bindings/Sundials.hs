@@ -1,8 +1,8 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedLabels #-}
 
 -- | This module contains most bindings relevant to sundial and utilities
 -- (matrix, vector) which are used by all solvers.
@@ -13,6 +13,7 @@ import Control.Monad (when)
 import Data.Void
 import Foreign
 import Foreign.C
+import GHC.OverloadedLabels
 import GHC.Stack
 import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
@@ -290,7 +291,7 @@ handleTermination successFlag getDiagnostics action = do
 --
 -- Each solver implementation must tag the flag with the relevant tag so they
 -- cannot be mixed.
-newtype Flag k = Flag { getInt :: CInt }
+newtype Flag k = Flag {getInt :: CInt}
   deriving newtype (Eq)
 
 -- | Return 'True' if the flag represents an unrecoverable failure (e.g.
@@ -303,3 +304,63 @@ isNegative (Flag i) = i < 0
 -- It is tagged with the solver implementation
 newtype SolverObject k = SolverObject (Ptr Void)
   deriving newtype (Storable)
+
+class Sundials t where
+  sundialsGetNumSteps :: SolverObject t -> Ptr CLong -> IO (Flag t)
+
+  sundialsGetNumLinSolvSetups :: SolverObject t -> Ptr CLong -> IO (Flag t)
+
+  sundialsGetNumErrTestFails :: SolverObject t -> Ptr CLong -> IO (Flag t)
+
+  sundialsGetNumNonlinSolvIters :: SolverObject t -> Ptr CLong -> IO (Flag t)
+
+  sundialsGetNumNonlinSolvConvFails :: SolverObject t -> Ptr CLong -> IO (Flag t)
+
+  sundialsGetNumJacEvals :: SolverObject t -> Ptr CLong -> IO (Flag t)
+
+  sundialsGetNumGEvals :: SolverObject t -> Ptr CLong -> IO (Flag t)
+
+  sundialsGetEstLocalErrors :: SolverObject t -> N_Vector -> IO (Flag t)
+
+  sundialsGetErrWeights :: SolverObject t -> N_Vector -> IO (Flag t)
+
+  sundialsSetUserData :: SolverObject t -> Ptr UserData -> IO (Flag t)
+
+  sundialsSetMinStep :: SolverObject t -> CDouble -> IO (Flag t)
+
+  sundialsSetMaxStep :: SolverObject t -> CDouble -> IO (Flag t)
+
+  sundialsSetMaxNumSteps :: SolverObject t -> SunIndexType -> IO (Flag t)
+
+  sundialsSetMaxErrTestFails :: SolverObject t -> CInt -> IO (Flag t)
+
+  sundialsSVtolerances :: SolverObject t -> CDouble -> N_Vector -> IO (Flag t)
+
+  sundialsSetRootDirection :: SolverObject t -> Ptr CInt -> IO (Flag t)
+
+  sundialsSetNoInactiveRootWarn :: SolverObject t -> IO (Flag t)
+
+  sundialsSetLinearSolver :: SolverObject t -> SUNLinearSolver -> SUNMatrix -> IO (Flag t)
+
+  sundialsGetRootInfo :: SolverObject t -> Ptr CInt -> IO (Flag t)
+
+  sundialsSetInitStep :: SolverObject t -> CDouble -> IO (Flag t)
+
+-- | Use a sundial getter to recover a value and throw an error if it fails
+--
+-- TODO: should we inline or specialize these functions?
+cvGet ::
+  (IsLabel "SUCCESS" (Flag t), HasCallStack, Storable b) =>
+  (SolverObject t -> Ptr b -> IO (Flag t)) -> (SolverObject t) -> IO b
+cvGet getter cvode_mem = do
+  alloca $ \ptr -> do
+    err <- getter cvode_mem ptr
+    when (err /= #SUCCESS) $ do
+      error $ "Failure during cvGet"
+    peek ptr
+
+-- | TODO: should we inline or specialize these functions?
+check :: (IsLabel "SUCCESS" (Flag t), HasCallStack) => Int -> Flag t -> IO ()
+check retCode status
+  | status == #SUCCESS = pure ()
+  | otherwise = throwIO (ReturnCode retCode)

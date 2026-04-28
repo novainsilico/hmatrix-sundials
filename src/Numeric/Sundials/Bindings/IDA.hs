@@ -1,16 +1,16 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
 module Numeric.Sundials.Bindings.IDA where
 
 import Foreign
 import Foreign.C
+import GHC.OverloadedLabels
 import Numeric.Sundials.Bindings.Sundials
 import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
-import GHC.OverloadedLabels
 
 foreign import ccall "IDACreate" cIDACreate :: SUNContext -> IO (SolverObject IDA)
 
@@ -94,3 +94,44 @@ instance IsLabel "TOO_CLOSE" (Flag IDA) where
 
 instance IsLabel "ROOT_RETURN" (Flag IDA) where
   fromLabel = Flag IDA_ROOT_RETURN
+
+instance Sundials IDA where
+  sundialsGetNumSteps = cIDAGetNumSteps
+
+  sundialsGetNumLinSolvSetups = cIDAGetNumLinSolvSetups
+
+  sundialsGetNumErrTestFails = cIDAGetNumErrTestFails
+
+  sundialsGetNumNonlinSolvIters = cIDAGetNumNonlinSolvIters
+
+  sundialsGetNumNonlinSolvConvFails = cIDAGetNumNonlinSolvConvFails
+
+  sundialsGetNumJacEvals = cIDAGetNumJacEvals
+
+  sundialsGetNumGEvals = cIDAGetNumGEvals
+
+  sundialsGetEstLocalErrors = cIDAGetEstLocalErrors
+
+  sundialsGetErrWeights = cIDAGetErrWeights
+
+  sundialsSetUserData = cIDASetUserData
+
+  sundialsSetMinStep = cIDASetMinStep
+
+  sundialsSetMaxStep = cIDASetMaxStep
+
+  sundialsSetMaxNumSteps = cIDASetMaxNumSteps
+
+  sundialsSetMaxErrTestFails = cIDASetMaxErrTestFails
+
+  sundialsSVtolerances = cIDASVtolerances
+
+  sundialsSetRootDirection = cIDASetRootDirection
+
+  sundialsSetNoInactiveRootWarn = cIDASetNoInactiveRootWarn
+
+  sundialsSetLinearSolver = cIDASetLinearSolver
+
+  sundialsGetRootInfo = cIDAGetRootInfo
+
+  sundialsSetInitStep = cIDASetInitStep

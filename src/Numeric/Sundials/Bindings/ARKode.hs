@@ -1,16 +1,16 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
 module Numeric.Sundials.Bindings.ARKode where
 
 import Foreign
 import Foreign.C
+import GHC.OverloadedLabels
 import Numeric.Sundials.Bindings.Sundials
 import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
-import GHC.OverloadedLabels
 
 foreign import ccall "ARKStepCreate" cARKStepCreate :: FunPtr OdeRhsCType -> FunPtr OdeRhsCType -> CDouble -> N_Vector -> SUNContext -> IO (SolverObject ARKode)
 
@@ -92,3 +92,44 @@ instance IsLabel "TOO_CLOSE" (Flag ARKode) where
 
 instance IsLabel "ROOT_RETURN" (Flag ARKode) where
   fromLabel = Flag ARK_ROOT_RETURN
+
+instance Sundials ARKode where
+  sundialsGetNumSteps = cARKodeGetNumSteps
+
+  sundialsGetNumLinSolvSetups = cARKodeGetNumLinSolvSetups
+
+  sundialsGetNumErrTestFails = cARKodeGetNumErrTestFails
+
+  sundialsGetNumNonlinSolvIters = cARKodeGetNumNonlinSolvIters
+
+  sundialsGetNumNonlinSolvConvFails = cARKodeGetNumNonlinSolvConvFails
+
+  sundialsGetNumJacEvals = cARKodeGetNumJacEvals
+
+  sundialsGetNumGEvals = cARKodeGetNumGEvals
+
+  sundialsGetEstLocalErrors = cARKodeGetEstLocalErrors
+
+  sundialsGetErrWeights = cARKodeGetErrWeights
+
+  sundialsSetUserData = cARKodeSetUserData
+
+  sundialsSetMinStep = cARKodeSetMinStep
+
+  sundialsSetMaxStep = cARKodeSetMaxStep
+
+  sundialsSetMaxNumSteps = cARKodeSetMaxNumSteps
+
+  sundialsSetMaxErrTestFails = cARKodeSetMaxErrTestFails
+
+  sundialsSVtolerances = cARKodeSVtolerances
+
+  sundialsSetRootDirection = cARKodeSetRootDirection
+
+  sundialsSetNoInactiveRootWarn = cARKodeSetNoInactiveRootWarn
+
+  sundialsSetLinearSolver = cARKodeSetLinearSolver
+
+  sundialsGetRootInfo = cARKodeGetRootInfo
+
+  sundialsSetInitStep = cARKodeSetInitStep

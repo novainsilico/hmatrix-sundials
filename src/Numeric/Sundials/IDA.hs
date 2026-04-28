@@ -6,8 +6,8 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
--- |
--- Solution of ordinary differential equation (ODE) initial value problems.
+-- | Solution of ordinary differential equation (ODE) initial value problems.
+--
 -- See <https://computation.llnl.gov/projects/sundials/sundials-software> for more detail.
 module Numeric.Sundials.IDA
   ( IDAMethod (..),
@@ -18,7 +18,7 @@ where
 import Control.Exception
 import Control.Monad (when)
 import Control.Monad.State
-import Data.Bool (bool)
+import Data.Bool
 import Data.Coerce (coerce)
 import Data.IORef (newIORef, writeIORef)
 import Data.Maybe (fromMaybe)
@@ -30,11 +30,11 @@ import GHC.Generics
 import GHC.IORef (readIORef)
 import GHC.Stack
 import Katip
+import Numeric.Sundials.Bindings.IDA
 import Numeric.Sundials.Bindings.Sundials
 import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
 import Text.Printf (printf)
-import Numeric.Sundials.Bindings.IDA
 
 -- | Available methods for IDA
 data IDAMethod = IDADefault
@@ -104,31 +104,31 @@ solveC CConsts {..} CVars {..} log_env =
               VS.imapM_ (\i v -> cNV_Ith_S yp i v) c_init_differentials
 
               withIDACreate sunctx 8396 $ \mem -> handleTermination @IDA #SUCCESS (getDiagnostics mem) $ do
-                let getDiagnosticsCallback state = getDiagnostics mem state
+                let getDiagnosticsCallback loopState = getDiagnostics mem loopState
                 cIDAInit mem c_ida_res t0 y yp >>= check 1234
                 -- /* Set the error handler */
                 setErrorHandler sunctx c_report_error
 
                 when (c_fixedstep > 0.0) $ do
-                  throwIO $ ReturnCodeWithMessage "fixedStep cannot be used with IDA" 6426
+                  throwIO $ ReturnCodeWithMessage "fixedStep can only be used with ARKode" 6426
 
                 -- /* Set the user data */
-                cIDASetUserData mem c_rhs_userdata >>= check 1949
+                sundialsSetUserData mem c_rhs_userdata >>= check 1949
 
                 -- /* Create serial vector for absolute tolerances */
                 withNVector_Serial c_dim sunctx 6471 $ \tv -> do
                   -- /* Specify tolerances */
                   VS.imapM_ (\i v -> cNV_Ith_S tv i v) c_atol
 
-                  cIDASetMinStep mem c_minstep >>= check 6433
+                  sundialsSetMinStep mem c_minstep >>= check 6433
                   case c_maxstep of
-                    Just max_step -> cIDASetMaxStep mem max_step >>= check 6434
+                    Just max_step -> sundialsSetMaxStep mem max_step >>= check 6434
                     Nothing -> pure ()
-                  cIDASetMaxNumSteps mem c_max_n_steps >>= check 9904
-                  cIDASetMaxErrTestFails mem c_max_err_test_fails >>= check 2512
+                  sundialsSetMaxNumSteps mem c_max_n_steps >>= check 9904
+                  sundialsSetMaxErrTestFails mem c_max_err_test_fails >>= check 2512
 
                   -- /* Specify the scalar relative tolerance and vector absolute tolerances */
-                  cIDASVtolerances mem c_rtol tv >>= check 6212
+                  sundialsSVtolerances mem c_rtol tv >>= check 6212
 
                   -- /* Specify the root function */
                   when (c_n_event_specs /= 0) $ do
@@ -136,9 +136,9 @@ solveC CConsts {..} CVars {..} log_env =
 
                     -- Set the root direction
                     VS.unsafeWith c_requested_event_direction $ \ptr -> do
-                      cIDASetRootDirection mem ptr >>= check 5678909876
+                      sundialsSetRootDirection mem ptr >>= check 5678909876
                     -- /* Disable the inactive roots warning; see https://git.novadiscovery.net/jinko/jinko/-/issues/2368 */
-                    cIDASetNoInactiveRootWarn mem >>= check 6291
+                    sundialsSetNoInactiveRootWarn mem >>= check 6291
 
                   -- /* Initialize a jacobian matrix and solver */
                   let withLinearSolver f = do
@@ -147,13 +147,13 @@ solveC CConsts {..} CVars {..} log_env =
                             withSUNSparseMatrix c_dim c_dim c_sparse_jac CSC_MAT sunctx 9061 $ \a -> do
                               withSUNLinSol_KLU y a sunctx 9316 $ \ls -> do
                                 -- /* Attach matrix and linear solver */
-                                cIDASetLinearSolver mem ls a >>= check 2625
+                                sundialsSetLinearSolver mem ls a >>= check 2625
                                 f
                           else do
                             withSUNDenseMatrix c_dim c_dim sunctx 9316 $ \a -> do
                               withSUNLinSol_Dense y a sunctx 9316 $ \ls -> do
                                 -- /* Attach matrix and linear solver */
-                                cIDASetLinearSolver mem ls a >>= check 2625
+                                sundialsSetLinearSolver mem ls a >>= check 2625
                                 f
 
                   withLinearSolver $ do
@@ -161,7 +161,7 @@ solveC CConsts {..} CVars {..} log_env =
                     when (c_init_step_size_set /= 0) $ do
                       --   /* FIXME: We could check if the initial step size is 0 */
                       --   /* or even NaN and then throw an error                 */
-                      cIDASetInitStep mem c_init_step_size >>= check 4010
+                      sundialsSetInitStep mem c_init_step_size >>= check 4010
 
                     -- /* Set the Jacobian if there is one */
                     when (c_jac_set /= 0) $ do
@@ -196,8 +196,7 @@ solveC CConsts {..} CVars {..} log_env =
 
                     c_ontimepoint t0 c_output_mat 0 (getDiagnosticsCallback init_loop)
 
-                    let loop :: CDouble -> StateT LoopState IO ()
-                        loop next_time_event = do
+                    let loop next_time_event = do
                           s <- get
                           let ti = fromMaybe (error "Incorrect c_sol_time access") $ c_sol_time VS.!? s.input_ind
 
@@ -213,18 +212,18 @@ solveC CConsts {..} CVars {..} log_env =
 
                           let next_stop_time = min ti next_time_event
                           debug $ printf "Main loop iteration: t = %.17g, next time point (ti) = %.17g, next time event = %.17g" (coerce s.t_start :: Double) (coerce ti :: Double) (coerce next_time_event :: Double)
-                          (flag, t) <- do
-                            (flag, currentT) <- liftIO $ alloca $ \t_ptr -> do
+                          (t, flag) <- do
+                            (current_t, flag) <- liftIO $ alloca $ \t_ptr -> do
                               flag <- cIDASolve mem next_stop_time t_ptr y yp IDA_NORMAL
 
                               -- When #TOO_CLOSE, the solver do not make any progress
                               -- and does not update t_ptr
                               -- See https://github.com/llnl/sundials/issues/840
-                              currentT <-
+                              current_t <-
                                 if flag == #TOO_CLOSE
-                                  then pure s.t_start
+                                  then pure $ s.t_start
                                   else peek t_ptr
-                              pure (flag, currentT)
+                              pure (current_t, flag)
 
                             -- The following error cases may happen in case a discontinuity
                             -- involving algebraic rules.: The solver is lost and cannot fix the algebraic
@@ -253,7 +252,7 @@ solveC CConsts {..} CVars {..} log_env =
                               -- See next message with " pretending it didn't
                               -- happen", it seems that this problem was
                               -- already solved for CVode in some ways
-                              || (flag == #ROOT_RETURN && currentT == s.t_start)
+                              || (flag == #ROOT_RETURN && current_t == s.t_start)
                               then do
                                 -- We need to go past the discontinuity, so add
                                 -- a small offset to the current time
@@ -268,7 +267,7 @@ solveC CConsts {..} CVars {..} log_env =
                                 --
                                 -- This happen when the discontinuity happen at
                                 -- a stop time.
-                                let nextT = min (currentT + 0.0001) next_stop_time
+                                let nextT = min (current_t + 0.0001) next_stop_time
 
                                 -- Reinitialise the solver, recompute initial condition (e.g. fix the algebraic value)
                                 idaReInit mem nextT y yp
@@ -277,18 +276,18 @@ solveC CConsts {..} CVars {..} log_env =
                                 liftIO $ cIDAGetConsistentIC mem y yp >>= check 12345432
 
                                 -- And restart the solver to go to the next solving time.
-                                (flag', currentT) <- liftIO $ alloca $ \t_ptr -> do
+                                (current_t, flag') <- liftIO $ alloca $ \t_ptr -> do
                                   flag <- cIDASolve mem next_stop_time t_ptr y yp IDA_NORMAL
                                   t <- peek t_ptr
-                                  pure (flag, t)
+                                  pure (t, flag)
 
-                                pure (flag', currentT)
+                                pure (current_t, flag')
                               else
-                                pure (flag, currentT)
+                                pure (current_t, flag)
 
-                          debug $ printf "IDASolve returned %d; now t = %.17g\n" (fromIntegral (getInt flag) :: Int) (coerce t :: Double)
+                          debug $ printf "Step function returned %d; now t = %.17g\n" (fromIntegral (getInt flag) :: Int) (coerce t :: Double)
                           let root_based_event = flag == #ROOT_RETURN
-                          let time_based_event = t == next_time_event
+                              time_based_event = t == next_time_event
                           t <-
                             if flag == #TOO_CLOSE && not time_based_event
                               then do
@@ -313,8 +312,8 @@ solveC CConsts {..} CVars {..} log_env =
                                       then do
                                         liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \ele -> do
                                           liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \weights -> do
-                                            local_errors_flag <- liftIO $ cIDAGetEstLocalErrors mem ele
-                                            error_weights_flag <- liftIO $ cIDAGetErrWeights mem weights
+                                            local_errors_flag <- liftIO $ sundialsGetEstLocalErrors mem ele
+                                            error_weights_flag <- liftIO $ sundialsGetErrWeights mem weights
                                             when (local_errors_flag == #SUCCESS && error_weights_flag == #SUCCESS) $ do
                                               let go ix destination source
                                                     | ix == c_dim = pure ()
@@ -363,7 +362,7 @@ solveC CConsts {..} CVars {..} log_env =
                                 else do
                                   debug ("Handling root-based events")
                                   liftIO $ VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
-                                    cIDAGetRootInfo mem c_root_info_ptr >>= check 1235
+                                    sundialsGetRootInfo mem c_root_info_ptr >>= check 1235
                                     let go i n_events_triggered
                                           | i >= c_n_event_specs = pure n_events_triggered
                                           | otherwise = do
@@ -372,7 +371,7 @@ solveC CConsts {..} CVars {..} log_env =
 
                                               if ev /= 0 && ev * req_dir >= 0
                                                 then do
-                                                  --           /* After the above call to ARKodeGetRootInfo, c_root_info has an
+                                                  --           /* After the above call to GetRootInfo, c_root_info has an
                                                   --           entry per EventSpec. Here we reuse the same array but convert it
                                                   --           into one that contains indices of triggered events. */
                                                   --           c_root_info[n_events_triggered++] = i;
@@ -514,29 +513,29 @@ solveC CConsts {..} CVars {..} log_env =
 getDiagnostics :: (SolverObject IDA) -> LoopState -> IO SundialsDiagnostics
 getDiagnostics cvode_mem loopState = do
   -- /* Get some final statistics on how the solve progressed */
-  nst <- cvGet cIDAGetNumSteps cvode_mem
+  nst <- cvGet sundialsGetNumSteps cvode_mem
 
-  -- This diagnostic is not available with IDA
+  -- This diagnostic is not available
   let nst_a = 0 :: Int
 
   nfe <- cvGet cIDAGetNumResEvals cvode_mem
 
-  -- This diagnostic is not available with IDA
+  -- This diagnostic is not available
   let nfi = 0 :: Int
 
-  nsetups <- cvGet cIDAGetNumLinSolvSetups cvode_mem
+  nsetups <- cvGet sundialsGetNumLinSolvSetups cvode_mem
 
-  netf <- cvGet cIDAGetNumErrTestFails cvode_mem
+  netf <- cvGet sundialsGetNumErrTestFails cvode_mem
 
-  nni <- cvGet cIDAGetNumNonlinSolvIters cvode_mem
+  nni <- cvGet sundialsGetNumNonlinSolvIters cvode_mem
 
-  ncfn <- cvGet cIDAGetNumNonlinSolvConvFails cvode_mem
+  ncfn <- cvGet sundialsGetNumNonlinSolvConvFails cvode_mem
 
-  nje <- cvGet cIDAGetNumJacEvals cvode_mem
+  nje <- cvGet sundialsGetNumJacEvals cvode_mem
 
   nfeLS <- cvGet cIDAGetNumLinResEvals cvode_mem
 
-  gevals <- cvGet cIDAGetNumGEvals cvode_mem
+  gevals <- cvGet sundialsGetNumGEvals cvode_mem
 
   let diagnostics =
         SundialsDiagnostics
@@ -597,11 +596,6 @@ getDiagnostics cvode_mem loopState = do
    later time.
 -}
 
-check :: (HasCallStack) => Int -> Flag IDA -> IO ()
-check retCode status
-  | status == #SUCCESS = pure ()
-  | otherwise = throwIO (ReturnCode retCode)
-
 withIDACreate ::
   (HasCallStack) =>
   ( SUNContext ->
@@ -619,7 +613,6 @@ withIDACreate sunctx errCode f = do
         with p cIDAFree
   bracket create destroy f
 
-
 idaReInit :: (SolverObject IDA) -> CDouble -> N_Vector -> N_Vector -> StateT LoopState IO ()
 idaReInit ida_mem t y yp = do
   -- Before reinit, we get the diagnostics and update the current diagnostics
@@ -631,12 +624,3 @@ idaReInit ida_mem t y yp = do
   liftIO $ cIDAReInit ida_mem t y yp >>= check 1576
 
   modify $ \s -> s {nb_reinit = nb_reinit s + 1}
-
-
-cvGet :: (HasCallStack) => (Storable b) => ((SolverObject IDA) -> Ptr b -> IO (Flag IDA)) -> (SolverObject IDA) -> IO b
-cvGet getter cvode_mem = do
-  alloca $ \ptr -> do
-    err <- getter cvode_mem ptr
-    when (err /= #SUCCESS) $ do
-      error $ "Failure during cvGet"
-    peek ptr

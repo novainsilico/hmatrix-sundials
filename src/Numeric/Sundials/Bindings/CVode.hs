@@ -1,16 +1,16 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
 module Numeric.Sundials.Bindings.CVode where
 
 import Foreign
 import Foreign.C
+import GHC.OverloadedLabels
 import Numeric.Sundials.Bindings.Sundials
 import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
-import GHC.OverloadedLabels
 
 foreign import ccall "CVodeCreate" cCVodeCreate :: CInt -> SUNContext -> IO (SolverObject CVode)
 
@@ -80,3 +80,44 @@ instance IsLabel "TOO_CLOSE" (Flag CVode) where
 
 instance IsLabel "ROOT_RETURN" (Flag CVode) where
   fromLabel = Flag CV_ROOT_RETURN
+
+instance Sundials CVode where
+  sundialsGetNumSteps = cCVodeGetNumSteps
+
+  sundialsGetNumLinSolvSetups = cCVodeGetNumLinSolvSetups
+
+  sundialsGetNumErrTestFails = cCVodeGetNumErrTestFails
+
+  sundialsGetNumNonlinSolvIters = cCVodeGetNumNonlinSolvIters
+
+  sundialsGetNumNonlinSolvConvFails = cCVodeGetNumNonlinSolvConvFails
+
+  sundialsGetNumJacEvals = cCVodeGetNumJacEvals
+
+  sundialsGetNumGEvals = cCVodeGetNumGEvals
+
+  sundialsGetEstLocalErrors = cCVodeGetEstLocalErrors
+
+  sundialsGetErrWeights = cCVodeGetErrWeights
+
+  sundialsSetUserData = cCVodeSetUserData
+
+  sundialsSetMinStep = cCVodeSetMinStep
+
+  sundialsSetMaxStep = cCVodeSetMaxStep
+
+  sundialsSetMaxNumSteps = cCVodeSetMaxNumSteps
+
+  sundialsSetMaxErrTestFails = cCVodeSetMaxErrTestFails
+
+  sundialsSVtolerances = cCVodeSVtolerances
+
+  sundialsSetRootDirection = cCVodeSetRootDirection
+
+  sundialsSetNoInactiveRootWarn = cCVodeSetNoInactiveRootWarn
+
+  sundialsSetLinearSolver = cCVodeSetLinearSolver
+
+  sundialsGetRootInfo = cCVodeGetRootInfo
+
+  sundialsSetInitStep = cCVodeSetInitStep
