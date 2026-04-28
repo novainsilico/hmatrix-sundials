@@ -30,9 +30,9 @@ module Numeric.Sundials
     -- * Solving options
     ODEOpts (..),
     OdeMethod (..),
-    ARK.ARKMethod (..),
-    CV.CVMethod (..),
-    IDA.IDAMethod (..),
+    Solver.ARKMethod (..),
+    Solver.CVMethod (..),
+    Solver.IDAMethod (..),
     allOdeMethods,
     IsMethod (..),
     MethodType (..),
@@ -83,19 +83,18 @@ import Foreign.Storable (peek, poke)
 import GHC.Generics
 import Katip
 import Numeric.LinearAlgebra.HMatrix as H hiding (Vector, (<>))
-import qualified Numeric.Sundials.ARKode as ARK
 import Numeric.Sundials.Bindings.Sundials (N_Vector (..), cNV_Ith_S, withNVector_Serial, withSUNContext)
-import qualified Numeric.Sundials.CVode as CV
 import Numeric.Sundials.Common
 import Numeric.Sundials.Foreign
 import Numeric.Sundials.Foreign as T
-import qualified Numeric.Sundials.IDA as IDA
+import Numeric.Sundials.Solver (Solver (..))
+import qualified Numeric.Sundials.Solver as Solver
 
 -- | A supported ODE solving method, either by CVode or ARKode
 data OdeMethod
-  = CVMethod CV.CVMethod
-  | ARKMethod ARK.ARKMethod
-  | IDAMethod IDA.IDAMethod
+  = CVMethod Solver.CVMethod
+  | ARKMethod Solver.ARKMethod
+  | IDAMethod Solver.IDAMethod
   deriving (Eq, Ord, Show, Read, Generic)
 
 -- | List of all supported ODE methods
@@ -156,9 +155,9 @@ solve ::
 solve opts =
   let solveC =
         case odeMethod opts of
-          CVMethod {} -> CV.solveC
-          ARKMethod {} -> ARK.solveC
-          IDAMethod {} -> IDA.solveC
+          CVMethod {} -> Solver.solveC CVode
+          ARKMethod {} -> Solver.solveC ARKode
+          IDAMethod {} -> Solver.solveC IDA
    in solveCommon solveC opts
 
 -- | The common solving logic between ARKode and CVode

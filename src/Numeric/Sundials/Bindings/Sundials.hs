@@ -3,6 +3,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE RankNTypes #-}
 
 -- | This module contains most bindings relevant to sundial and utilities
 -- (matrix, vector) which are used by all solvers.
@@ -292,7 +293,7 @@ handleTermination successFlag getDiagnostics action = do
 -- Each solver implementation must tag the flag with the relevant tag so they
 -- cannot be mixed.
 newtype Flag k = Flag {getInt :: CInt}
-  deriving newtype (Eq)
+  deriving newtype (Eq, Show)
 
 -- | Return 'True' if the flag represents an unrecoverable failure (e.g.
 -- negative value)

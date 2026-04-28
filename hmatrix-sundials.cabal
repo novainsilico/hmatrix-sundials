@@ -41,6 +41,7 @@ library
   other-modules:       Numeric.Sundials.ARKode
                        Numeric.Sundials.CVode
                        Numeric.Sundials.IDA
+                       Numeric.Sundials.Solver
                        Numeric.Sundials.Foreign
                        Numeric.Sundials.Bindings.Sundials
                        Numeric.Sundials.Bindings.CVode
