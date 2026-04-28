@@ -98,7 +98,7 @@ instance IsMethod ARKMethod where
 
 solveC :: CConsts -> CVars (VS.MVector RealWorld) -> LogEnv -> IO (CInt, SundialsDiagnostics)
 solveC CConsts {..} CVars {..} log_env =
-  let report_error_new_api = wrapErrorNewApi (reportErrorWithKatip log_env)
+  let report_error_new_api = wrapErrorNewApi (reportErrorWithKatip (getInt @ARKode #TOO_CLOSE) log_env)
       debug :: String -> StateT LoopState IO ()
       debug _s = do
         -- This SPAMs the logging system with a lot of informations, so we do

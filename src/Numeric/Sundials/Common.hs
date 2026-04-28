@@ -302,10 +302,12 @@ wrapErrorNewApi f _lineNumber functionName moduleName errorMessage errorCode use
 cstringToText :: CString -> IO T.Text
 cstringToText = fmap T.decodeUtf8 . BS.packCString
 
-reportErrorWithKatip :: LogEnv -> ReportErrorFn
-reportErrorWithKatip log_env err_code c_mod_name c_func_name c_msg _userdata = do
-  -- See Note [CV_TOO_CLOSE]
-  if err_code == CV_TOO_CLOSE
+reportErrorWithKatip :: CInt -> LogEnv -> ReportErrorFn
+reportErrorWithKatip too_close_flag log_env err_code c_mod_name c_func_name c_msg _userdata = do
+  -- Historically, we do not log when CV_TOO_CLOSE fire, because it fires a lot
+  -- and spam the output.
+  -- TODO: this need to be investigated
+  if err_code == too_close_flag
     then pure ()
     else do
       let
