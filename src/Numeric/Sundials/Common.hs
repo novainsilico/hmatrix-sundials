@@ -216,7 +216,8 @@ assembleSolverResult OdeProblem {..} (ret, diagnostics) CVars {..} = do
           then (mempty, mempty)
           else (VS.unsafeCoerceVector c_local_error, VS.unsafeCoerceVector c_var_weight)
   return $
-    if ret == CV_SUCCESS
+    -- If it is a success. All implementation uses 0 as the success code.
+    if ret == 0
       then
         Right $
           SundialsSolution
