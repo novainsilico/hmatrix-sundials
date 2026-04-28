@@ -297,3 +297,9 @@ newtype Flag k = Flag CInt
 -- negative value)
 isNegative :: Flag k -> Bool
 isNegative (Flag i) = i < 0
+
+-- | An opaque pointer to the solver object
+--
+-- It is tagged with the solver implementation
+newtype SolverObject k = SolverObject (Ptr Void)
+  deriving newtype (Storable)

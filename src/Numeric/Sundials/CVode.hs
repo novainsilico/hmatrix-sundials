@@ -398,7 +398,7 @@ solveC CConsts {..} CVars {..} log_env =
                           loop
                     execStateT loop init_loop
 
-getDiagnostics :: CVodeMem -> LoopState -> IO SundialsDiagnostics
+getDiagnostics :: (SolverObject CVode) -> LoopState -> IO SundialsDiagnostics
 getDiagnostics cvode_mem loopState = do
   -- /* Get some final statistics on how the solve progressed */
   nst <- cvGet cCVodeGetNumSteps cvode_mem
@@ -489,10 +489,10 @@ check retCode status
   | status == #SUCCESS = pure ()
   | otherwise = throwIO (ReturnCode retCode)
 
-withCVodeMem :: (HasCallStack) => CInt -> SUNContext -> Int -> (CVodeMem -> IO a) -> IO a
+withCVodeMem :: (HasCallStack) => CInt -> SUNContext -> Int -> ((SolverObject CVode) -> IO a) -> IO a
 withCVodeMem method suncontext errCode f = do
   let create = do
-        res@(CVodeMem ptr) <- cCVodeCreate method suncontext
+        res@(SolverObject ptr) <- cCVodeCreate method suncontext
         if ptr == nullPtr
           then throwIO $ ReturnCodeWithMessage "Error in cvodeCreate" errCode
           else pure res
@@ -500,7 +500,7 @@ withCVodeMem method suncontext errCode f = do
         with p cCVodeFree
   bracket create destroy f
 
-cvGet :: (HasCallStack) => (Storable b) => (CVodeMem -> Ptr b -> IO (Flag CVode)) -> CVodeMem -> IO b
+cvGet :: (HasCallStack) => (Storable b) => ((SolverObject CVode) -> Ptr b -> IO (Flag CVode)) -> (SolverObject CVode) -> IO b
 cvGet getter cvode_mem = do
   alloca $ \ptr -> do
     err <- getter cvode_mem ptr

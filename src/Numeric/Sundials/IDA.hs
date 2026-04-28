@@ -511,7 +511,7 @@ solveC CConsts {..} CVars {..} log_env =
                           loop next_time_event
                     execStateT (loop first_time_event) init_loop
 
-getDiagnostics :: IDAMem -> LoopState -> IO SundialsDiagnostics
+getDiagnostics :: (SolverObject IDA) -> LoopState -> IO SundialsDiagnostics
 getDiagnostics cvode_mem loopState = do
   -- /* Get some final statistics on how the solve progressed */
   nst <- cvGet cIDAGetNumSteps cvode_mem
@@ -606,12 +606,12 @@ withIDACreate ::
   (HasCallStack) =>
   ( SUNContext ->
     Int ->
-    (IDAMem -> IO c) ->
+    ((SolverObject IDA) -> IO c) ->
     IO c
   )
 withIDACreate sunctx errCode f = do
   let create = do
-        res@(IDAMem ptr) <- cIDACreate sunctx
+        res@(SolverObject ptr) <- cIDACreate sunctx
         if ptr == nullPtr
           then throwIO $ ReturnCodeWithMessage "Error in IDACreate" errCode
           else pure res
@@ -620,7 +620,7 @@ withIDACreate sunctx errCode f = do
   bracket create destroy f
 
 
-idaReInit :: IDAMem -> CDouble -> N_Vector -> N_Vector -> StateT LoopState IO ()
+idaReInit :: (SolverObject IDA) -> CDouble -> N_Vector -> N_Vector -> StateT LoopState IO ()
 idaReInit ida_mem t y yp = do
   -- Before reinit, we get the diagnostics and update the current diagnostics
   state <- get
@@ -633,7 +633,7 @@ idaReInit ida_mem t y yp = do
   modify $ \s -> s {nb_reinit = nb_reinit s + 1}
 
 
-cvGet :: (HasCallStack) => (Storable b) => (IDAMem -> Ptr b -> IO (Flag IDA)) -> IDAMem -> IO b
+cvGet :: (HasCallStack) => (Storable b) => ((SolverObject IDA) -> Ptr b -> IO (Flag IDA)) -> (SolverObject IDA) -> IO b
 cvGet getter cvode_mem = do
   alloca $ \ptr -> do
     err <- getter cvode_mem ptr

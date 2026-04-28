@@ -462,7 +462,7 @@ solveC CConsts {..} CVars {..} log_env =
                           loop
                     execStateT loop init_loop
 
-getDiagnostics :: ARKodeMem -> CInt -> CInt -> LoopState -> IO SundialsDiagnostics
+getDiagnostics :: (SolverObject ARKode) -> CInt -> CInt -> LoopState -> IO SundialsDiagnostics
 getDiagnostics cvode_mem c_method c_n_event_specs loopState = do
   -- /* Get some final statistics on how the solve progressed */
   nst <- cvGet cARKodeGetNumSteps cvode_mem
@@ -576,12 +576,12 @@ withARKStepCreate ::
     N_Vector ->
     SUNContext ->
     Int ->
-    (ARKodeMem -> IO c) ->
+    ((SolverObject ARKode) -> IO c) ->
     IO c
   )
 withARKStepCreate explicit implicit t0 y0 sunctx errCode f = do
   let create = do
-        res@(ARKodeMem ptr) <- cARKStepCreate explicit implicit t0 y0 sunctx
+        res@(SolverObject ptr) <- cARKStepCreate explicit implicit t0 y0 sunctx
         if ptr == nullPtr
           then throwIO $ ReturnCodeWithMessage "Error in cvodeCreate" errCode
           else pure res
@@ -589,7 +589,7 @@ withARKStepCreate explicit implicit t0 y0 sunctx errCode f = do
         with p cARKStepFree
   bracket create destroy f
 
-cvGet :: (HasCallStack) => (Storable b) => (ARKodeMem -> Ptr b -> IO (Flag ARKode)) -> ARKodeMem -> IO b
+cvGet :: (HasCallStack) => (Storable b) => ((SolverObject ARKode) -> Ptr b -> IO (Flag ARKode)) -> (SolverObject ARKode) -> IO b
 cvGet getter cvode_mem = do
   alloca $ \ptr -> do
     err <- getter cvode_mem ptr
