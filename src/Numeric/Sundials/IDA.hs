@@ -103,9 +103,9 @@ solveC CConsts {..} CVars {..} log_env =
               VS.imapM_ (\i v -> cNV_Ith_S y i v) c_init_cond
               VS.imapM_ (\i v -> cNV_Ith_S yp i v) c_init_differentials
 
-              withIDACreate sunctx 8396 $ \ida_mem -> handleTermination @IDA #SUCCESS (getDiagnostics ida_mem) $ do
-                let getDiagnosticsCallback state = getDiagnostics ida_mem state
-                cIDAInit ida_mem c_ida_res t0 y yp >>= check 1234
+              withIDACreate sunctx 8396 $ \mem -> handleTermination @IDA #SUCCESS (getDiagnostics mem) $ do
+                let getDiagnosticsCallback state = getDiagnostics mem state
+                cIDAInit mem c_ida_res t0 y yp >>= check 1234
                 -- /* Set the error handler */
                 setErrorHandler sunctx c_report_error
 
@@ -113,32 +113,32 @@ solveC CConsts {..} CVars {..} log_env =
                   throwIO $ ReturnCodeWithMessage "fixedStep cannot be used with IDA" 6426
 
                 -- /* Set the user data */
-                cIDASetUserData ida_mem c_rhs_userdata >>= check 1949
+                cIDASetUserData mem c_rhs_userdata >>= check 1949
 
                 -- /* Create serial vector for absolute tolerances */
                 withNVector_Serial c_dim sunctx 6471 $ \tv -> do
                   -- /* Specify tolerances */
                   VS.imapM_ (\i v -> cNV_Ith_S tv i v) c_atol
 
-                  cIDASetMinStep ida_mem c_minstep >>= check 6433
+                  cIDASetMinStep mem c_minstep >>= check 6433
                   case c_maxstep of
-                    Just max_step -> cIDASetMaxStep ida_mem max_step >>= check 6434
+                    Just max_step -> cIDASetMaxStep mem max_step >>= check 6434
                     Nothing -> pure ()
-                  cIDASetMaxNumSteps ida_mem c_max_n_steps >>= check 9904
-                  cIDASetMaxErrTestFails ida_mem c_max_err_test_fails >>= check 2512
+                  cIDASetMaxNumSteps mem c_max_n_steps >>= check 9904
+                  cIDASetMaxErrTestFails mem c_max_err_test_fails >>= check 2512
 
                   -- /* Specify the scalar relative tolerance and vector absolute tolerances */
-                  cIDASVtolerances ida_mem c_rtol tv >>= check 6212
+                  cIDASVtolerances mem c_rtol tv >>= check 6212
 
                   -- /* Specify the root function */
                   when (c_n_event_specs /= 0) $ do
-                    cIDARootInit ida_mem c_n_event_specs c_event_fn_ida >>= check 6290
+                    cIDARootInit mem c_n_event_specs c_event_fn_ida >>= check 6290
 
                     -- Set the root direction
                     VS.unsafeWith c_requested_event_direction $ \ptr -> do
-                      cIDASetRootDirection ida_mem ptr >>= check 5678909876
+                      cIDASetRootDirection mem ptr >>= check 5678909876
                     -- /* Disable the inactive roots warning; see https://git.novadiscovery.net/jinko/jinko/-/issues/2368 */
-                    cIDASetNoInactiveRootWarn ida_mem >>= check 6291
+                    cIDASetNoInactiveRootWarn mem >>= check 6291
 
                   -- /* Initialize a jacobian matrix and solver */
                   let withLinearSolver f = do
@@ -147,13 +147,13 @@ solveC CConsts {..} CVars {..} log_env =
                             withSUNSparseMatrix c_dim c_dim c_sparse_jac CSC_MAT sunctx 9061 $ \a -> do
                               withSUNLinSol_KLU y a sunctx 9316 $ \ls -> do
                                 -- /* Attach matrix and linear solver */
-                                cIDASetLinearSolver ida_mem ls a >>= check 2625
+                                cIDASetLinearSolver mem ls a >>= check 2625
                                 f
                           else do
                             withSUNDenseMatrix c_dim c_dim sunctx 9316 $ \a -> do
                               withSUNLinSol_Dense y a sunctx 9316 $ \ls -> do
                                 -- /* Attach matrix and linear solver */
-                                cIDASetLinearSolver ida_mem ls a >>= check 2625
+                                cIDASetLinearSolver mem ls a >>= check 2625
                                 f
 
                   withLinearSolver $ do
@@ -161,20 +161,20 @@ solveC CConsts {..} CVars {..} log_env =
                     when (c_init_step_size_set /= 0) $ do
                       --   /* FIXME: We could check if the initial step size is 0 */
                       --   /* or even NaN and then throw an error                 */
-                      cIDASetInitStep ida_mem c_init_step_size >>= check 4010
+                      cIDASetInitStep mem c_init_step_size >>= check 4010
 
                     -- /* Set the Jacobian if there is one */
                     when (c_jac_set /= 0) $ do
-                      cIDASetJacFn ida_mem c_jac_ida >>= check 3124
+                      cIDASetJacFn mem c_jac_ida >>= check 3124
 
                     VS.imapM_ (\i v -> cNV_Ith_S ids i v) c_is_differential
-                    cIDASetId ida_mem ids >>= check 6789
+                    cIDASetId mem ids >>= check 6789
 
                     first_time_event <- liftIO c_next_time_event
                     -- if any of the value is algebraic, we try to setup the initial condition
                     when (VS.any (== 0.0) c_is_differential) $ do
                       let ti = fromMaybe (error "Incorrect c_sol_time access") $ c_sol_time VS.!? 1
-                      res <- cIDACalcIC ida_mem IDA_YA_YDP_INIT (if first_time_event > t0 && not (isInfinite first_time_event) then first_time_event else ti)
+                      res <- cIDACalcIC mem IDA_YA_YDP_INIT (if first_time_event > t0 && not (isInfinite first_time_event) then first_time_event else ti)
                       when (res /= #SUCCESS) $ check (let Flag v = res in fromIntegral v) res
 
                       -- Update the initial vector with meaningful values
@@ -183,7 +183,7 @@ solveC CConsts {..} CVars {..} log_env =
                       --
                       -- This is important to override 'y' here, because we
                       -- store it in next block.
-                      cIDAGetConsistentIC ida_mem y yp >>= check 12345432
+                      cIDAGetConsistentIC mem y yp >>= check 12345432
 
                     -- /* Store initial conditions */
                     VSM.write c_output_mat (0 * (fromIntegral c_dim + 1) + 0) (c_sol_time VS.! 0)
@@ -215,7 +215,7 @@ solveC CConsts {..} CVars {..} log_env =
                           debug $ printf "Main loop iteration: t = %.17g, next time point (ti) = %.17g, next time event = %.17g" (coerce s.t_start :: Double) (coerce ti :: Double) (coerce next_time_event :: Double)
                           (flag, t) <- do
                             (flag, currentT) <- liftIO $ alloca $ \t_ptr -> do
-                              flag <- cIDASolve ida_mem next_stop_time t_ptr y yp IDA_NORMAL
+                              flag <- cIDASolve mem next_stop_time t_ptr y yp IDA_NORMAL
 
                               -- When #TOO_CLOSE, the solver do not make any progress
                               -- and does not update t_ptr
@@ -271,14 +271,14 @@ solveC CConsts {..} CVars {..} log_env =
                                 let nextT = min (currentT + 0.0001) next_stop_time
 
                                 -- Reinitialise the solver, recompute initial condition (e.g. fix the algebraic value)
-                                idaReInit ida_mem nextT y yp
+                                idaReInit mem nextT y yp
 
-                                liftIO $ cIDACalcIC ida_mem IDA_YA_YDP_INIT (nextT * 1.1) >>= check 5220
-                                liftIO $ cIDAGetConsistentIC ida_mem y yp >>= check 12345432
+                                liftIO $ cIDACalcIC mem IDA_YA_YDP_INIT (nextT * 1.1) >>= check 5220
+                                liftIO $ cIDAGetConsistentIC mem y yp >>= check 12345432
 
                                 -- And restart the solver to go to the next solving time.
                                 (flag', currentT) <- liftIO $ alloca $ \t_ptr -> do
-                                  flag <- cIDASolve ida_mem next_stop_time t_ptr y yp IDA_NORMAL
+                                  flag <- cIDASolve mem next_stop_time t_ptr y yp IDA_NORMAL
                                   t <- peek t_ptr
                                   pure (flag, t)
 
@@ -313,8 +313,8 @@ solveC CConsts {..} CVars {..} log_env =
                                       then do
                                         liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \ele -> do
                                           liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \weights -> do
-                                            local_errors_flag <- liftIO $ cIDAGetEstLocalErrors ida_mem ele
-                                            error_weights_flag <- liftIO $ cIDAGetErrWeights ida_mem weights
+                                            local_errors_flag <- liftIO $ cIDAGetEstLocalErrors mem ele
+                                            error_weights_flag <- liftIO $ cIDAGetErrWeights mem weights
                                             when (local_errors_flag == #SUCCESS && error_weights_flag == #SUCCESS) $ do
                                               let go ix destination source
                                                     | ix == c_dim = pure ()
@@ -363,7 +363,7 @@ solveC CConsts {..} CVars {..} log_env =
                                 else do
                                   debug ("Handling root-based events")
                                   liftIO $ VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
-                                    cIDAGetRootInfo ida_mem c_root_info_ptr >>= check 1235
+                                    cIDAGetRootInfo mem c_root_info_ptr >>= check 1235
                                     let go i n_events_triggered
                                           | i >= c_n_event_specs = pure n_events_triggered
                                           | otherwise = do
@@ -411,7 +411,7 @@ solveC CConsts {..} CVars {..} log_env =
                                             VS.imapM_ (\i v -> cNV_Ith_S y i v) new_y
 
                                             state <- readIORef ref
-                                            state' <- execStateT (idaReInit ida_mem t y yp) state
+                                            state' <- execStateT (idaReInit mem t y yp) state
                                             writeIORef ref state'
                                             -- excerpt from the documentation:
                                             -- here the requested time is the first value for which a solution will be requested (from IDASolve()).
@@ -421,10 +421,10 @@ solveC CConsts {..} CVars {..} log_env =
                                             -- "tout1 too close to t0 to attempt initial condition calculation"
                                             -- so we use "next_stop_time * 1.1" instead which is highly questionable but seems to work in practice...
                                             -- We also special case if the next stop time is equal 0, we set something difference (because 0 * 1.1 is still 0)
-                                            liftIO $ cIDACalcIC ida_mem IDA_YA_YDP_INIT (if next_stop_time /= 0 then next_stop_time * 1.1 else 1) >>= check 5220
+                                            liftIO $ cIDACalcIC mem IDA_YA_YDP_INIT (if next_stop_time /= 0 then next_stop_time * 1.1 else 1) >>= check 5220
 
                                             -- Update the initial vector with meaningful values
-                                            liftIO $ cIDAGetConsistentIC ida_mem y yp >>= check 12345432
+                                            liftIO $ cIDAGetConsistentIC mem y yp >>= check 12345432
 
                                             -- Returns it to the caller
                                             VS.generateM (fromIntegral c_dim) (\i -> cNV_Ith_S' y i)
@@ -452,7 +452,7 @@ solveC CConsts {..} CVars {..} log_env =
                             -- TODO: maybe it is incorrect, we have to ensure that IDACalcIC had been called correctly
                             when (do_reinit > 0) $ do
                               debug ("Re-initializing the system")
-                              idaReInit ida_mem t y yp
+                              idaReInit mem t y yp
 
                             if record_events /= 0
                               then do

@@ -104,9 +104,9 @@ solveC CConsts {..} CVars {..} log_env =
               VS.imapM_ (\i v -> cNV_Ith_S y i v) c_init_cond
 
               -- // NB: Uses the Newton solver by default
-              withCVodeMem c_method sunctx 8396 $ \cvode_mem -> handleTermination @CVode #SUCCESS (getDiagnostics cvode_mem) $ do
-                let getDiagnosticsCallback loopState = getDiagnostics cvode_mem loopState
-                cCVodeInit cvode_mem c_rhs t0 y >>= check 1960
+              withCVodeMem c_method sunctx 8396 $ \mem -> handleTermination @CVode #SUCCESS (getDiagnostics mem) $ do
+                let getDiagnosticsCallback loopState = getDiagnostics mem loopState
+                cCVodeInit mem c_rhs t0 y >>= check 1960
 
                 -- /* Set the error handler */
                 setErrorHandler sunctx c_report_error
@@ -115,32 +115,32 @@ solveC CConsts {..} CVars {..} log_env =
                   throwIO $ ReturnCodeWithMessage "fixedStep cannot be used with CVode" 6426
 
                 -- /* Set the user data */
-                cCVodeSetUserData cvode_mem c_rhs_userdata >>= check 1949
+                cCVodeSetUserData mem c_rhs_userdata >>= check 1949
 
                 -- /* Create serial vector for absolute tolerances */
                 withNVector_Serial c_dim sunctx 6471 $ \tv -> do
                   -- /* Specify tolerances */
                   VS.imapM_ (\i v -> cNV_Ith_S tv i v) c_atol
 
-                  cCVodeSetMinStep cvode_mem c_minstep >>= check 6433
+                  cCVodeSetMinStep mem c_minstep >>= check 6433
                   case c_maxstep of
-                    Just max_step -> cCVodeSetMaxStep cvode_mem max_step >>= check 6434
+                    Just max_step -> cCVodeSetMaxStep mem max_step >>= check 6434
                     Nothing -> pure ()
-                  cCVodeSetMaxNumSteps cvode_mem c_max_n_steps >>= check 9904
-                  cCVodeSetMaxErrTestFails cvode_mem c_max_err_test_fails >>= check 2512
+                  cCVodeSetMaxNumSteps mem c_max_n_steps >>= check 9904
+                  cCVodeSetMaxErrTestFails mem c_max_err_test_fails >>= check 2512
 
                   -- /* Specify the scalar relative tolerance and vector absolute tolerances */
-                  cCVodeSVtolerances cvode_mem c_rtol tv >>= check 6212
+                  cCVodeSVtolerances mem c_rtol tv >>= check 6212
 
                   -- /* Specify the root function */
                   when (c_n_event_specs /= 0) $ do
-                    cCVodeRootInit cvode_mem c_n_event_specs c_event_fn >>= check 6290
+                    cCVodeRootInit mem c_n_event_specs c_event_fn >>= check 6290
 
                     -- Set the root direction
                     VS.unsafeWith c_requested_event_direction $ \ptr -> do
-                      cCVodeSetRootDirection cvode_mem ptr >>= check 5678909876
+                      cCVodeSetRootDirection mem ptr >>= check 5678909876
                     -- /* Disable the inactive roots warning; see https://git.novadiscovery.net/jinko/jinko/-/issues/2368 */
-                    cCVodeSetNoInactiveRootWarn cvode_mem >>= check 6291
+                    cCVodeSetNoInactiveRootWarn mem >>= check 6291
 
                   -- /* Initialize a jacobian matrix and solver */
                   let withLinearSolver f = do
@@ -149,13 +149,13 @@ solveC CConsts {..} CVars {..} log_env =
                             withSUNSparseMatrix c_dim c_dim c_sparse_jac CSC_MAT sunctx 9061 $ \a -> do
                               withSUNLinSol_KLU y a sunctx 9316 $ \ls -> do
                                 -- /* Attach matrix and linear solver */
-                                cCVodeSetLinearSolver cvode_mem ls a >>= check 2625
+                                cCVodeSetLinearSolver mem ls a >>= check 2625
                                 f
                           else do
                             withSUNDenseMatrix c_dim c_dim sunctx 9316 $ \a -> do
                               withSUNLinSol_Dense y a sunctx 9316 $ \ls -> do
                                 -- /* Attach matrix and linear solver */
-                                cCVodeSetLinearSolver cvode_mem ls a >>= check 2625
+                                cCVodeSetLinearSolver mem ls a >>= check 2625
                                 f
 
                   withLinearSolver $ do
@@ -163,11 +163,11 @@ solveC CConsts {..} CVars {..} log_env =
                     when (c_init_step_size_set /= 0) $ do
                       --   /* FIXME: We could check if the initial step size is 0 */
                       --   /* or even NaN and then throw an error                 */
-                      cCVodeSetInitStep cvode_mem c_init_step_size >>= check 4010
+                      cCVodeSetInitStep mem c_init_step_size >>= check 4010
 
                     -- /* Set the Jacobian if there is one */
                     when (c_jac_set /= 0) $ do
-                      cCVodeSetJacFn cvode_mem c_jac >>= check 3124
+                      cCVodeSetJacFn mem c_jac >>= check 3124
 
                     -- /* Store initial conditions */
                     VSM.write c_output_mat (0 * (fromIntegral c_dim + 1) + 0) (c_sol_time VS.! 0)
@@ -200,7 +200,7 @@ solveC CConsts {..} CVars {..} log_env =
                           let next_stop_time = min ti next_time_event
                           debug $ printf "Main loop iteration: t = %.17g (%a), next time point (ti) = %.17g, next time event = %.17g" (coerce s.t_start :: Double) (coerce ti :: Double) (coerce next_time_event :: Double)
                           (t, flag) <- liftIO $ alloca $ \t_ptr -> do
-                            flag <- cCVode cvode_mem next_stop_time y t_ptr CV_NORMAL
+                            flag <- cCVode mem next_stop_time y t_ptr CV_NORMAL
                             -- When #TOO_CLOSE, the solver does not make any progress and does not update t_ptr
                             -- See https://github.com/llnl/sundials/issues/840
                             current_t <-
@@ -236,8 +236,8 @@ solveC CConsts {..} CVars {..} log_env =
                                       then do
                                         liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \ele -> do
                                           liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \weights -> do
-                                            local_errors_flag <- liftIO $ cCVodeGetEstLocalErrors cvode_mem ele
-                                            error_weights_flag <- liftIO $ cCVodeGetErrWeights cvode_mem weights
+                                            local_errors_flag <- liftIO $ cCVodeGetEstLocalErrors mem ele
+                                            error_weights_flag <- liftIO $ cCVodeGetErrWeights mem weights
                                             when (local_errors_flag == #SUCCESS && error_weights_flag == #SUCCESS) $ do
                                               let go ix destination source
                                                     | ix == c_dim = pure ()
@@ -286,7 +286,7 @@ solveC CConsts {..} CVars {..} log_env =
                                 else do
                                   debug ("Handling root-based events")
                                   liftIO $ VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
-                                    flag <- cCVodeGetRootInfo cvode_mem c_root_info_ptr
+                                    flag <- cCVodeGetRootInfo mem c_root_info_ptr
                                     when (isNegative flag) $ do
                                       throwIO $ ReturnCode 2829
                                     let go i n_events_triggered
@@ -379,11 +379,11 @@ solveC CConsts {..} CVars {..} log_env =
 
                               -- Before reinit, we get the diagnostics and update the current diagnostics
                               state <- get
-                              diagnostics <- liftIO $ getDiagnostics cvode_mem state
+                              diagnostics <- liftIO $ getDiagnostics mem state
                               put $ state {current_diagnostics = diagnostics}
 
                               -- This reset the diagnostics stored in cvode_mem
-                              liftIO $ cCVodeReInit cvode_mem t y
+                              liftIO $ cCVodeReInit mem t y
 
                               modify $ \s -> s {nb_reinit = nb_reinit s + 1}
 

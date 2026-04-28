@@ -158,41 +158,41 @@ solveC CConsts {..} CVars {..} log_env =
               let withArkStep
                     | not implicit = \c_rhs -> withARKStepCreate c_rhs nullFunPtr
                     | otherwise = \c_rhs -> withARKStepCreate nullFunPtr c_rhs
-              withArkStep c_rhs t0 y sunctx 8396 $ \cvode_mem -> handleTermination @ARKode  #SUCCESS (getDiagnostics cvode_mem c_method c_n_event_specs) $ do
-                let getDiagnosticsCallback state = getDiagnostics cvode_mem c_method c_n_event_specs state
+              withArkStep c_rhs t0 y sunctx 8396 $ \mem -> handleTermination @ARKode  #SUCCESS (getDiagnostics mem c_method c_n_event_specs) $ do
+                let getDiagnosticsCallback state = getDiagnostics mem c_method c_n_event_specs state
                 -- /* Set the error handler */
                 setErrorHandler sunctx c_report_error
 
                 when (c_fixedstep > 0.0) $ do
-                  cARKodeSetFixedStep cvode_mem c_fixedstep
+                  cARKodeSetFixedStep mem c_fixedstep
 
                 -- /* Set the user data */
-                cARKodeSetUserData cvode_mem c_rhs_userdata >>= check 1949
+                cARKodeSetUserData mem c_rhs_userdata >>= check 1949
 
                 -- /* Create serial vector for absolute tolerances */
                 withNVector_Serial c_dim sunctx 6471 $ \tv -> do
                   -- /* Specify tolerances */
                   VS.imapM_ (\i v -> cNV_Ith_S tv i v) c_atol
 
-                  cARKodeSetMinStep cvode_mem c_minstep >>= check 6433
+                  cARKodeSetMinStep mem c_minstep >>= check 6433
                   case c_maxstep of
-                    Just max_step -> cARKodeSetMaxStep cvode_mem max_step >>= check 6434
+                    Just max_step -> cARKodeSetMaxStep mem max_step >>= check 6434
                     Nothing -> pure ()
-                  cARKodeSetMaxNumSteps cvode_mem c_max_n_steps >>= check 9904
-                  cARKodeSetMaxErrTestFails cvode_mem c_max_err_test_fails >>= check 2512
+                  cARKodeSetMaxNumSteps mem c_max_n_steps >>= check 9904
+                  cARKodeSetMaxErrTestFails mem c_max_err_test_fails >>= check 2512
 
                   -- /* Specify the scalar relative tolerance and vector absolute tolerances */
-                  cARKodeSVtolerances cvode_mem c_rtol tv >>= check 6212
+                  cARKodeSVtolerances mem c_rtol tv >>= check 6212
 
                   -- /* Specify the root function */
                   when (c_n_event_specs /= 0) $ do
-                    cARKodeRootInit cvode_mem c_n_event_specs c_event_fn >>= check 6290
+                    cARKodeRootInit mem c_n_event_specs c_event_fn >>= check 6290
 
                     -- Set the root direction
                     VS.unsafeWith c_requested_event_direction $ \ptr -> do
-                      cARKodeSetRootDirection cvode_mem ptr >>= check 5678909876
+                      cARKodeSetRootDirection mem ptr >>= check 5678909876
                     -- /* Disable the inactive roots warning; see https://git.novadiscovery.net/jinko/jinko/-/issues/2368 */
-                    cARKodeSetNoInactiveRootWarn cvode_mem >>= check 6291
+                    cARKodeSetNoInactiveRootWarn mem >>= check 6291
 
                   -- /* Initialize a jacobian matrix and solver */
                   let withLinearSolver f
@@ -202,13 +202,13 @@ solveC CConsts {..} CVars {..} log_env =
                                 withSUNSparseMatrix c_dim c_dim c_sparse_jac CSC_MAT sunctx 9061 $ \a -> do
                                   withSUNLinSol_KLU y a sunctx 9316 $ \ls -> do
                                     -- /* Attach matrix and linear solver */
-                                    cARKodeSetLinearSolver cvode_mem ls a >>= check 2625
+                                    cARKodeSetLinearSolver mem ls a >>= check 2625
                                     f
                               else do
                                 withSUNDenseMatrix c_dim c_dim sunctx 9316 $ \a -> do
                                   withSUNLinSol_Dense y a sunctx 9316 $ \ls -> do
                                     -- /* Attach matrix and linear solver */
-                                    cARKodeSetLinearSolver cvode_mem ls a >>= check 2625
+                                    cARKodeSetLinearSolver mem ls a >>= check 2625
                                     f
                         | otherwise = f
 
@@ -217,11 +217,11 @@ solveC CConsts {..} CVars {..} log_env =
                     when (c_init_step_size_set /= 0) $ do
                       --   /* FIXME: We could check if the initial step size is 0 */
                       --   /* or even NaN and then throw an error                 */
-                      cARKodeSetInitStep cvode_mem c_init_step_size >>= check 4010
+                      cARKodeSetInitStep mem c_init_step_size >>= check 4010
 
                     -- /* Set the Jacobian if there is one */
                     when (c_jac_set /= 0 && implicit) $ do
-                      cARKodeSetJacFn cvode_mem c_jac >>= check 3124
+                      cARKodeSetJacFn mem c_jac >>= check 3124
 
                     -- /* Store initial conditions */
                     VSM.write c_output_mat (0 * (fromIntegral c_dim + 1) + 0) (c_sol_time VS.! 0)
@@ -236,9 +236,9 @@ solveC CConsts {..} CVars {..} log_env =
 
                     if implicit
                       then do
-                        cARKStepSetTableNum cvode_mem c_method (-1) >>= check 26643
+                        cARKStepSetTableNum mem c_method (-1) >>= check 26643
                       else do
-                        cARKStepSetTableNum cvode_mem (-1) c_method >>= check 26643
+                        cARKStepSetTableNum mem (-1) c_method >>= check 26643
 
                     let loop :: StateT LoopState IO ()
                         loop = do
@@ -260,7 +260,7 @@ solveC CConsts {..} CVars {..} log_env =
                           let next_stop_time = min ti next_time_event
                           debug $ printf "Main loop iteration: t = %.17g (%a), next time point (ti) = %.17g, next time event = %.17g" (coerce s.t_start :: Double) (coerce ti :: Double) (coerce next_time_event :: Double)
                           (t, flag) <- liftIO $ alloca $ \t_ptr -> do
-                            flag <- cARKodeEvolve cvode_mem next_stop_time y t_ptr ARK_NORMAL
+                            flag <- cARKodeEvolve mem next_stop_time y t_ptr ARK_NORMAL
 
                             -- When #TOO_CLOSE, the solver do not make any progress
                             -- and does not update t_ptr
@@ -298,8 +298,8 @@ solveC CConsts {..} CVars {..} log_env =
                                       then do
                                         liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \ele -> do
                                           liftIO $ withNVector_Serial c_dim sunctx 12341234 $ \weights -> do
-                                            local_errors_flag <- liftIO $ cARKodeGetEstLocalErrors cvode_mem ele
-                                            error_weights_flag <- liftIO $ cARKodeGetErrWeights cvode_mem weights
+                                            local_errors_flag <- liftIO $ cARKodeGetEstLocalErrors mem ele
+                                            error_weights_flag <- liftIO $ cARKodeGetErrWeights mem weights
                                             when (local_errors_flag == #SUCCESS && error_weights_flag == #SUCCESS) $ do
                                               let go ix destination source
                                                     | ix == c_dim = pure ()
@@ -348,7 +348,7 @@ solveC CConsts {..} CVars {..} log_env =
                                 else do
                                   debug ("Handling root-based events")
                                   liftIO $ VSM.unsafeWith c_root_info $ \c_root_info_ptr -> do
-                                    flag <- cARKodeGetRootInfo cvode_mem c_root_info_ptr
+                                    flag <- cARKodeGetRootInfo mem c_root_info_ptr
                                     when (isNegative flag) $ do
                                       throwIO $ ReturnCode 2829
                                     let go i n_events_triggered
@@ -446,9 +446,9 @@ solveC CConsts {..} CVars {..} log_env =
 
                               if not implicit
                                 then do
-                                  liftIO $ cARKStepReInit cvode_mem c_rhs nullFunPtr t y >>= check 1576
+                                  liftIO $ cARKStepReInit mem c_rhs nullFunPtr t y >>= check 1576
                                 else do
-                                  liftIO $ cARKStepReInit cvode_mem nullFunPtr c_rhs t y >>= check 1576
+                                  liftIO $ cARKStepReInit mem nullFunPtr c_rhs t y >>= check 1576
                               modify $ \s -> s {nb_reinit = nb_reinit s + 1}
 
                           when (t == ti) $ do
