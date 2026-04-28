@@ -53,7 +53,7 @@ foreign import ccall "ARKodeGetRootInfo" cARKodeGetRootInfo :: (SolverObject ARK
 
 foreign import ccall "ARKodeSetJacFn" cARKodeSetJacFn :: (SolverObject ARKode) -> FunPtr OdeJacobianCType -> IO (Flag ARKode)
 
-foreign import ccall "ARKodeSetFixedStep" cARKodeSetFixedStep :: (SolverObject ARKode) -> CDouble -> IO ()
+foreign import ccall "ARKodeSetFixedStep" cARKodeSetFixedStep :: (SolverObject ARKode) -> CDouble -> IO (Flag ARKode)
 
 -- Note: the CInt are actually Enum and this could be enforced
 foreign import ccall "ARKStepSetTableNum" cARKStepSetTableNum :: (SolverObject ARKode) -> CInt -> CInt -> IO (Flag ARKode)

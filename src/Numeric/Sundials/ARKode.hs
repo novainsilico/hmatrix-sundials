@@ -163,7 +163,7 @@ solveC CConsts {..} CVars {..} log_env =
                 setErrorHandler sunctx c_report_error
 
                 when (c_fixedstep > 0.0) $ do
-                  cARKodeSetFixedStep mem c_fixedstep
+                  cARKodeSetFixedStep mem c_fixedstep >> pure ()
 
                 -- /* Set the user data */
                 sundialsSetUserData mem c_rhs_userdata >>= check 1949
@@ -537,19 +537,19 @@ getDiagnostics cvode_mem c_method c_n_event_specs loopState = do
    * We restart Sundials with the tout being equal to the next solving time,
      which also happens to be equal t1.
    * Sundials sees that the start and end solving times are equal, and
-     returns the TOO_CLOSE error.
+     returns the #TOO_CLOSE error.
 
    Calculating on our side when the start and end times are "too close" by
    Sundials standards is a bit complicated (see the code at the beginning
    of the cvHin function). It's much easier just to call Sundials and
    handle the error.
 
-   For that, however, we need to make sure we ignore TOO_CLOSE in our
+   For that, however, we need to make sure we ignore #TOO_CLOSE in our
    error handler so as not to confuse the end users with mysterious error
    messages in the logs.
 
-   That said, we can't always rely on TOO_CLOSE. When the initial step
-   size is set, cvHin is not called, and TOO_CLOSE is not triggered.
+   That said, we can't always rely on #TOO_CLOSE. When the initial step
+   size is set, cvHin is not called, and #TOO_CLOSE is not triggered.
    Therefore we also add an explicit check to avoid an infinite loop of
    integrating over an empty interval.
 
