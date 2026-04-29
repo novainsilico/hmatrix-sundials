@@ -10,9 +10,6 @@ module Numeric.Sundials.Foreign
   , cV_ADAMS
   , cV_BDF
   , vectorToC
-  , cV_SUCCESS
-  , cV_ROOT_RETURN
-  , cV_TOO_CLOSE
   , SunIndexType
   , SunRealType
   , SunMatrix(..)
@@ -307,13 +304,6 @@ getLength ptr = (#peek struct _N_VectorContent_Serial, length) ptr
 
 putLength :: SunIndexType -> Ptr b -> IO ()
 putLength l ptr = (#poke struct _N_VectorContent_Serial, length) ptr l
-
-cV_SUCCESS :: CInt
-cV_SUCCESS = #const CV_SUCCESS
-cV_ROOT_RETURN :: CInt
-cV_ROOT_RETURN = #const CV_ROOT_RETURN
-cV_TOO_CLOSE :: CInt
-cV_TOO_CLOSE = #const CV_TOO_CLOSE
 
 cSC_MAT :: CInt
 cSC_MAT = #const CSC_MAT

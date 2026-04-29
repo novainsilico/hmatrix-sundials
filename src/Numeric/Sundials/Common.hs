@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE OverloadedLabels #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 -- | Common infrastructure for CVode/ARKode
@@ -214,7 +216,8 @@ assembleSolverResult OdeProblem {..} (ret, diagnostics) CVars {..} = do
           then (mempty, mempty)
           else (VS.unsafeCoerceVector c_local_error, VS.unsafeCoerceVector c_var_weight)
   return $
-    if ret == T.cV_SUCCESS
+    -- If it is a success. All implementation uses 0 as the success code.
+    if ret == 0
       then
         Right $
           SundialsSolution
@@ -291,16 +294,21 @@ type ReportErrorFnNew =
   Ptr () -> -- sundial context
   IO ()
 
+foreign import ccall "wrapper"
+  mkReport :: ReportErrorFnNew -> IO (FunPtr ReportErrorFnNew)
+
 wrapErrorNewApi :: ReportErrorFn -> ReportErrorFnNew
 wrapErrorNewApi f _lineNumber functionName moduleName errorMessage errorCode userData _sundialContext = f errorCode moduleName functionName errorMessage userData
 
 cstringToText :: CString -> IO T.Text
 cstringToText = fmap T.decodeUtf8 . BS.packCString
 
-reportErrorWithKatip :: LogEnv -> ReportErrorFn
-reportErrorWithKatip log_env err_code c_mod_name c_func_name c_msg _userdata = do
-  -- See Note [CV_TOO_CLOSE]
-  if err_code == T.cV_TOO_CLOSE
+reportErrorWithKatip :: CInt -> LogEnv -> ReportErrorFn
+reportErrorWithKatip too_close_flag log_env err_code c_mod_name c_func_name c_msg _userdata = do
+  -- Historically, we do not log when CV_TOO_CLOSE fire, because it fires a lot
+  -- and spam the output.
+  -- TODO: this need to be investigated
+  if err_code == too_close_flag
     then pure ()
     else do
       let
