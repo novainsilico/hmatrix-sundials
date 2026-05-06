@@ -369,69 +369,6 @@ solveC solver CConsts {..} CVars {..} log_env =
                                   if flag == #TOO_CLOSE
                                     then pure s.t_start
                                     else liftIO $ peek t_ptr
-                                (current_t, flag) :: (CDouble, Flag solver) <- case solver of
-                                  CVode -> pure (current_t, flag)
-                                  ARKode -> pure (current_t, flag)
-                                  IDA -> do
-                                    -- The following error cases may happen in case a discontinuity
-                                    -- involving algebraic rules.: The solver is lost and cannot fix the algebraic
-                                    -- rule trivially, or will reduce to really small
-                                    -- step before finally failing after too much
-                                    -- steps.
-                                    --
-                                    -- According to sundial documentation, the problem
-                                    -- should have a smooth support over all
-                                    -- discontinuities, they even suggest to use a user
-                                    -- flag to dynamically switch between different
-                                    -- function.
-                                    --
-                                    -- This is not implemented yet in our work, so
-                                    -- instead we use an arbitrary heuristic to try to
-                                    -- jump over the discontinuity.
-                                    --
-                                    -- This is not a perfect solution, but it can solve
-                                    -- without "too much" errors a few difficult
-                                    -- problems.
-                                    if flag == Flag IDA_ERR_FAIL
-                                      || flag == Flag IDA_CONV_FAIL
-                                      || flag == Flag IDA_TOO_MUCH_WORK
-                                      -- Sometime we find a root and do not advance.
-                                      -- We'll just try to switch to the next step
-                                      -- See next message with " pretending it didn't
-                                      -- happen", it seems that this problem was
-                                      -- already solved for CVode in some ways
-                                      || (flag == #ROOT_RETURN && current_t == s.t_start)
-                                      then do
-                                        -- We need to go past the discontinuity, so add
-                                        -- a small offset to the current time
-                                        --
-                                        -- This is hackish, however it does not happen a lot.
-                                        --
-                                        -- We need to ensure that the new point is not
-                                        -- AFTER the "next_stop_time" otherwise, future
-                                        -- `IDASolve` will just try to go backward,
-                                        -- leading to a solver failure. Hence the 'min'
-                                        -- here.
-                                        --
-                                        -- This happen when the discontinuity happen at
-                                        -- a stop time.
-                                        let nextT = min (current_t + 0.0001) next_stop_time
-
-                                        -- Reinitialise the solver, recompute initial condition (e.g. fix the algebraic value)
-                                        idaReInit c_n_event_specs implicit mem nextT y yp
-
-                                        liftIO $ cIDACalcIC mem IDA_YA_YDP_INIT (nextT * 1.1) >>= check 5220
-                                        liftIO $ cIDAGetConsistentIC mem y yp >>= check 12345432
-
-                                        -- And restart the solver to go to the next solving time.
-                                        (current_t, flag') <- liftIO $ alloca $ \t_ptr -> do
-                                          flag <- cIDASolve mem next_stop_time t_ptr y yp IDA_NORMAL
-                                          t <- peek t_ptr
-                                          pure (t, flag)
-
-                                        pure (current_t, flag')
-                                      else
-                                        pure (current_t, flag)
                                 pure (current_t, flag)
 
                               debug $ printf "Step function returned %d; now t = %.17g\n" (fromIntegral (getInt flag) :: Int) (coerce t :: Double)
