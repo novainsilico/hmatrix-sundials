@@ -1,0 +1,58 @@
+{
+    "Right": {
+        "actualTimeGrid": [
+            0,
+            1,
+            1,
+            3,
+            3,
+            4,
+            4
+        ],
+        "diagnostics": {
+            "dlsGetNumJacEvals": 0,
+            "dlsGetNumRhsEvals": 0,
+            "odeGetNumErrTestFails": 0,
+            "odeGetNumLinSolvSetups": 0,
+            "odeGetNumNonlinSolvConvFails": 0,
+            "odeGetNumNonlinSolvIters": 0,
+            "odeGetNumRhsEvals_fe": 57,
+            "odeGetNumRhsEvals_fi": 0,
+            "odeGetNumStepAttempts": 15,
+            "odeGetNumSteps": 15,
+            "odeMaxEventsReached": false,
+            "odeNumReinit": 4,
+            "odeNumRootEvals": 26
+        },
+        "solutionMatrix": [
+            [
+                0,
+                0
+            ],
+            [
+                0.9999999999999998,
+                0
+            ],
+            [
+                0.9999999999999998,
+                5
+            ],
+            [
+                3,
+                5
+            ],
+            [
+                3,
+                13
+            ],
+            [
+                3.999999999999999,
+                13
+            ],
+            [
+                3.999999999999999,
+                8
+            ]
+        ]
+    }
+}

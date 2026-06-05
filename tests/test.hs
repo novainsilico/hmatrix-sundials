@@ -70,7 +70,7 @@ data OdeSolver
 availableSolvers :: [OdeSolver]
 availableSolvers =
   [ OdeSolver "CVode" (CVMethod <$> [BDF, ADAMS]),
-    OdeSolver "ARKode" (ARKMethod <$> [SDIRK_5_3_4, TRBDF2_3_3_2, FEHLBERG_6_4_5]),
+    OdeSolver "ARKode" (ARKMethod <$> [minBound .. maxBound]),
     OdeSolver "IDA" [IDAMethod IDADefault]
   ]
 
@@ -611,8 +611,8 @@ noErrorTests opts =
 
 accuracyTests opts =
   testGroup "Accuracy tests" $
-    -- TODO(guibou): This test is broken with one arkmethod for unknown reasons
-    if odeMethod opts /= ARKMethod TRBDF2_3_3_2
+    -- This test fails with explicit methods, probbaly because the problem is stiff
+    if methodType (odeMethod opts) == Implicit
       then
         [ testCase "Simple sine" $ do
             Right r <- runKatipT ?log_env $ solve opts {minStep = 0, jacobianRepr = SparseJacobian (SparsePattern [0, 1, 1, 0])} simpleSine

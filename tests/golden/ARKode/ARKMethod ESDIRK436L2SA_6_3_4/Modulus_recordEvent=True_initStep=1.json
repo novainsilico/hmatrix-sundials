@@ -1,0 +1,107 @@
+{
+    "Right": {
+        "actualTimeGrid": [
+            0,
+            1,
+            1,
+            2,
+            2,
+            3,
+            3,
+            4,
+            4,
+            5,
+            5,
+            6,
+            6,
+            7,
+            7,
+            8,
+            8,
+            9,
+            9,
+            10,
+            10
+        ],
+        "diagnostics": {
+            "dlsGetNumJacEvals": 20,
+            "dlsGetNumRhsEvals": 20,
+            "odeGetNumErrTestFails": 179,
+            "odeGetNumLinSolvSetups": 271,
+            "odeGetNumNonlinSolvConvFails": 0,
+            "odeGetNumNonlinSolvIters": 4113,
+            "odeGetNumRhsEvals_fe": 0,
+            "odeGetNumRhsEvals_fi": 5604,
+            "odeGetNumStepAttempts": 378,
+            "odeGetNumSteps": 199,
+            "odeMaxEventsReached": false,
+            "odeNumReinit": 10,
+            "odeNumRootEvals": 253
+        },
+        "solutionMatrix": [
+            [
+                0
+            ],
+            [
+                0.49999718501295837
+            ],
+            [
+                0.49999718501295837
+            ],
+            [
+                0.9999976816411704
+            ],
+            [
+                0.9999976816411704
+            ],
+            [
+                1.5000003734140612
+            ],
+            [
+                1.5000003734140612
+            ],
+            [
+                2.000004312472316
+            ],
+            [
+                2.000004312472316
+            ],
+            [
+                2.5000056998738236
+            ],
+            [
+                2.5000056998738236
+            ],
+            [
+                3.0000065427570446
+            ],
+            [
+                3.0000065427570446
+            ],
+            [
+                3.5000089645822694
+            ],
+            [
+                3.5000089645822694
+            ],
+            [
+                4.000009513182508
+            ],
+            [
+                4.000009513182508
+            ],
+            [
+                4.500002963291157
+            ],
+            [
+                4.500002963291157
+            ],
+            [
+                4.999998867106489
+            ],
+            [
+                4.999998867106489
+            ]
+        ]
+    }
+}

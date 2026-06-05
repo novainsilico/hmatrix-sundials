@@ -25,7 +25,8 @@ library
                        bytestring,
                        text,
                        aeson,
-                       katip
+                       katip,
+                       containers
                        
   extra-libraries:     sundials_arkode
                        sundials_cvode
