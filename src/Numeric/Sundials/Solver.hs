@@ -28,6 +28,7 @@ import Data.Bool
 import Data.Coerce (coerce)
 import Data.IORef
 import Data.Maybe (fromMaybe)
+import qualified Data.Set as Set
 import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Storable.Mutable as VSM
 import Foreign
@@ -46,8 +47,12 @@ import Text.Printf (printf)
 
 -- | Available methods for CVode
 data CVMethod
-  = ADAMS
-  | BDF
+  = -- | The Moulton-Adams linear multistep method, suited for non-stiff problems,
+    -- with adaptive order ranging from 1 to 12
+    ADAMS
+  | -- | The multi-step implicit BDF method, suited for stiff problems,
+    -- with adaptive order from 1 to 5
+    BDF
   deriving (Eq, Ord, Show, Read, Generic, Bounded, Enum)
 
 instance IsMethod CVMethod where
@@ -57,62 +62,46 @@ instance IsMethod CVMethod where
 
 -- | Available methods for ARKode
 data ARKMethod
-  = SDIRK_2_1_2
-  | BILLINGTON_3_3_2
-  | TRBDF2_3_3_2
-  | KVAERNO_4_2_3
-  | ARK324L2SA_DIRK_4_2_3
-  | CASH_5_2_4
-  | CASH_5_3_4
-  | SDIRK_5_3_4
-  | KVAERNO_5_3_4
-  | ARK436L2SA_DIRK_6_3_4
-  | KVAERNO_7_4_5
-  | ARK548L2SA_DIRK_8_4_5
-  | HEUN_EULER_2_1_2
-  | BOGACKI_SHAMPINE_4_2_3
-  | ARK324L2SA_ERK_4_2_3
-  | ZONNEVELD_5_3_4
-  | ARK436L2SA_ERK_6_3_4
-  | SAYFY_ABURUB_6_3_4
-  | CASH_KARP_6_4_5
-  | FEHLBERG_6_4_5
-  | DORMAND_PRINCE_7_4_5
-  | ARK548L2SA_ERK_8_4_5
-  | VERNER_8_5_6
-  | FEHLBERG_13_7_8
+  = -- | ARKODE's default 2nd order implicit method
+    ARK2_DIRK_3_1_2
+  | -- | ARKODE's default 3rd order implicit method
+    ESDIRK325L2SA_5_2_3
+  | -- | ARKODE's default 4th order implicit method
+    ESDIRK436L2SA_6_3_4
+  | -- | ARKODE's default 3rd order explicit method
+    BOGACKI_SHAMPINE_4_2_3
+  | -- | ARKODE's default 5th order explicit method
+    TSITOURAS_7_4_5
+  | -- | ARKODE's default 7th order explicit method
+    VERNER_10_6_7
+  | -- | ARKODE's default 9th order explicit method
+    VERNER_16_8_9
   deriving (Eq, Ord, Show, Read, Generic, Bounded, Enum)
 
 instance IsMethod ARKMethod where
-  methodToInt SDIRK_2_1_2 = sDIRK_2_1_2
-  methodToInt BILLINGTON_3_3_2 = bILLINGTON_3_3_2
-  methodToInt TRBDF2_3_3_2 = tRBDF2_3_3_2
-  methodToInt KVAERNO_4_2_3 = kVAERNO_4_2_3
-  methodToInt ARK324L2SA_DIRK_4_2_3 = aRK324L2SA_DIRK_4_2_3
-  methodToInt CASH_5_2_4 = cASH_5_2_4
-  methodToInt CASH_5_3_4 = cASH_5_3_4
-  methodToInt SDIRK_5_3_4 = sDIRK_5_3_4
-  methodToInt KVAERNO_5_3_4 = kVAERNO_5_3_4
-  methodToInt ARK436L2SA_DIRK_6_3_4 = aRK436L2SA_DIRK_6_3_4
-  methodToInt KVAERNO_7_4_5 = kVAERNO_7_4_5
-  methodToInt ARK548L2SA_DIRK_8_4_5 = aRK548L2SA_DIRK_8_4_5
-  methodToInt HEUN_EULER_2_1_2 = hEUN_EULER_2_1_2
+  methodToInt ARK2_DIRK_3_1_2 = aRK2_DIRK_3_1_2
+  methodToInt ESDIRK325L2SA_5_2_3 = eSDIRK325L2SA_5_2_3
+  methodToInt ESDIRK436L2SA_6_3_4 = eSDIRK436L2SA_6_3_4
   methodToInt BOGACKI_SHAMPINE_4_2_3 = bOGACKI_SHAMPINE_4_2_3
-  methodToInt ARK324L2SA_ERK_4_2_3 = aRK324L2SA_ERK_4_2_3
-  methodToInt ZONNEVELD_5_3_4 = zONNEVELD_5_3_4
-  methodToInt ARK436L2SA_ERK_6_3_4 = aRK436L2SA_ERK_6_3_4
-  methodToInt SAYFY_ABURUB_6_3_4 = sAYFY_ABURUB_6_3_4
-  methodToInt CASH_KARP_6_4_5 = cASH_KARP_6_4_5
-  methodToInt FEHLBERG_6_4_5 = fEHLBERG_6_4_5
-  methodToInt DORMAND_PRINCE_7_4_5 = dORMAND_PRINCE_7_4_5
-  methodToInt ARK548L2SA_ERK_8_4_5 = aRK548L2SA_ERK_8_4_5
-  methodToInt VERNER_8_5_6 = vERNER_8_5_6
-  methodToInt FEHLBERG_13_7_8 = fEHLBERG_13_7_8
+  methodToInt TSITOURAS_7_4_5 = tSITOURAS_7_4_5
+  methodToInt VERNER_10_6_7 = vERNER_10_6_7
+  methodToInt VERNER_16_8_9 = vERNER_16_8_9
 
-  methodType method =
-    if methodToInt method < mIN_DIRK_NUM
-      then Explicit
-      else Implicit
+  methodType ARK2_DIRK_3_1_2 = Implicit
+  methodType ESDIRK325L2SA_5_2_3 = Implicit
+  methodType ESDIRK436L2SA_6_3_4 = Implicit
+  methodType BOGACKI_SHAMPINE_4_2_3 = Explicit
+  methodType TSITOURAS_7_4_5 = Explicit
+  methodType VERNER_10_6_7 = Explicit
+  methodType VERNER_16_8_9 = Explicit
+
+implicitArkodeMethodsAsCInts :: Set.Set CInt
+implicitArkodeMethodsAsCInts =
+  Set.fromList
+    . fmap methodToInt
+    . filter
+      (\method -> methodType method == Implicit)
+    $ [minBound @ARKMethod .. maxBound]
 
 -- | Available methods for IDA
 data IDAMethod = IDADefault
@@ -203,7 +192,7 @@ solveC solver CConsts {..} CVars {..} log_env =
 
             -- /* Initialize data structures */
             let implicit = case solver of
-                  ARKode -> c_method >= ARKODE_MIN_DIRK_NUM
+                  ARKode -> c_method `Set.member` implicitArkodeMethodsAsCInts
                   CVode -> True
                   IDA -> True
 

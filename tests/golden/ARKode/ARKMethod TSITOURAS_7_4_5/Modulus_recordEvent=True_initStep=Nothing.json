@@ -1,0 +1,107 @@
+{
+    "Right": {
+        "actualTimeGrid": [
+            0,
+            1,
+            1,
+            2,
+            2,
+            3,
+            3,
+            4,
+            4,
+            5,
+            5,
+            6,
+            6,
+            7,
+            7,
+            8,
+            8,
+            9,
+            9,
+            10,
+            10
+        ],
+        "diagnostics": {
+            "dlsGetNumJacEvals": 0,
+            "dlsGetNumRhsEvals": 0,
+            "odeGetNumErrTestFails": 158,
+            "odeGetNumLinSolvSetups": 0,
+            "odeGetNumNonlinSolvConvFails": 0,
+            "odeGetNumNonlinSolvIters": 0,
+            "odeGetNumRhsEvals_fe": 1790,
+            "odeGetNumRhsEvals_fi": 0,
+            "odeGetNumStepAttempts": 290,
+            "odeGetNumSteps": 132,
+            "odeMaxEventsReached": false,
+            "odeNumReinit": 10,
+            "odeNumRootEvals": 177
+        },
+        "solutionMatrix": [
+            [
+                0
+            ],
+            [
+                0.4999986448781894
+            ],
+            [
+                0.4999986448781894
+            ],
+            [
+                0.9999869186144458
+            ],
+            [
+                0.9999869186144458
+            ],
+            [
+                1.4999799807961498
+            ],
+            [
+                1.4999799807961498
+            ],
+            [
+                1.999992996731076
+            ],
+            [
+                1.999992996731076
+            ],
+            [
+                2.4999966064875205
+            ],
+            [
+                2.4999966064875205
+            ],
+            [
+                2.999965148754622
+            ],
+            [
+                2.999965148754622
+            ],
+            [
+                3.4999481503897156
+            ],
+            [
+                3.4999481503897156
+            ],
+            [
+                3.999952302217718
+            ],
+            [
+                3.999952302217718
+            ],
+            [
+                4.499943797495761
+            ],
+            [
+                4.499943797495761
+            ],
+            [
+                4.99993512312628
+            ],
+            [
+                4.99993512312628
+            ]
+        ]
+    }
+}

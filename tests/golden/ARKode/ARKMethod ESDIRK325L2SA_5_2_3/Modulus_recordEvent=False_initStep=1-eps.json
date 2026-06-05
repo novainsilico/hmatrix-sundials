@@ -1,0 +1,17 @@
+{
+    "Left": {
+        "errorCode": -3,
+        "errorEstimates": [
+            -1.0368516545663831e-6
+        ],
+        "partialResults": [
+            [
+                0,
+                0
+            ]
+        ],
+        "varWeights": [
+            999950.0024998751
+        ]
+    }
+}
