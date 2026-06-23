@@ -103,7 +103,7 @@ data CConsts = CConsts
     c_rhs :: FunPtr OdeRhsCType,
     -- | For IDA: residual function
     c_ida_res :: FunPtr IDAResFn,
-    c_rhs_userdata :: Ptr UserData,
+    c_userdata :: Ptr UserData,
     c_rtol :: CDouble,
     c_atol :: VS.Vector CDouble,
     c_n_event_specs :: CInt,
@@ -451,7 +451,9 @@ data OdeProblem = OdeProblem
     -- | How much error is tolerated in each variable.
     odeTolerances :: Tolerances,
     -- | This is called everytime the solver stores a timepoint
-    odeOnTimePoint :: Maybe TimePointHandler
+    odeOnTimePoint :: Maybe TimePointHandler,
+    -- | UserData passed to the rhs/residual and root functions
+    odeUserData :: Ptr UserData
   }
 
 data Tolerances = Tolerances
@@ -488,11 +490,11 @@ data UserData
 -- Can be either a Haskell function or a pointer to a C function.
 data OdeRhs
   = OdeRhsHaskell (CDouble -> VS.Vector CDouble -> Ptr UserData -> IO (VS.Vector CDouble))
-  | OdeRhsC (FunPtr OdeRhsCType) (Ptr UserData)
+  | OdeRhsC (FunPtr OdeRhsCType)
 
 data OdeResidual
   = OdeResidualHaskell (CDouble -> VS.Vector CDouble -> VS.Vector CDouble -> Ptr UserData -> IO (VS.Vector CDouble))
-  | OdeResidualC (FunPtr IDAResFn) (Ptr UserData)
+  | OdeResidualC (FunPtr IDAResFn)
 
 -- | A version of 'OdeRhsHaskell' that accepts a pure function
 odeRhsPure ::

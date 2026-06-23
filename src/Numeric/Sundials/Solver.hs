@@ -223,7 +223,7 @@ solveC solver CConsts {..} CVars {..} log_env =
                         _ -> throwIO $ ReturnCodeWithMessage "fixedStep can only be used with ARKode" 6426
 
                     -- /* Set the user data */
-                    sundialsSetUserData mem c_rhs_userdata >>= check 1949
+                    sundialsSetUserData mem c_userdata >>= check 1949
 
                     -- /* Create serial vector for absolute tolerances */
                     withNVector_Serial c_dim sunctx 6471 $ \tv -> do

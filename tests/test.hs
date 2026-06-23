@@ -40,6 +40,7 @@ import Test.Tasty.Golden.Advanced
 import Test.Tasty.HUnit
 import Text.Printf (printf)
 import Prelude hiding (quot, showList)
+import Foreign.Ptr (nullPtr)
 
 ----------------------------------------------------------------------
 --                            Helpers
@@ -59,7 +60,8 @@ emptyOdeProblem =
       odeSolTimes = error "emptyOdeProblem: no odeSolTimes provided",
       odeTolerances = defaultTolerances,
       -- TODO: test this callback
-      odeOnTimePoint = Nothing
+      odeOnTimePoint = Nothing,
+      odeUserData = nullPtr
     }
 
 data OdeSolver

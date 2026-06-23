@@ -308,7 +308,7 @@ withCConsts ODEOpts {..} OdeProblem {..} = runContT $ do
   -- Most of the not required values are set to dummy values. This is imperfect
   -- and unsafe, we just assume that the test coverage does correctly test
   -- theses cases.
-  (c_rhs, c_ida_res, c_rhs_userdata, c_is_differential, c_init_differentials) <- case odeFunctions of
+  (c_rhs, c_ida_res, c_is_differential, c_init_differentials) <- case odeFunctions of
     OdeProblemFunctions odeRhs -> do
       -- Estimation of the initial differentials, because not provided by the user
       let compute_initial_differentials c_rhs c_rhs_userdata = do
@@ -330,16 +330,16 @@ withCConsts ODEOpts {..} OdeProblem {..} = runContT $ do
         -- TODO: maybe we can leverage the user data somewhere in order to work
         -- with DDE and other stuffs and "constant" values (e.g. time-varying
         -- categoricals for example)
-        OdeRhsC ptr u -> do
+        OdeRhsC ptr -> do
           case getProblemType odeMethod of
             Residual -> do
               -- If we don't know, let's assume that everything is differential
               let c_is_differential = VS.replicate dim 1.0
               funptrida <- wrap_ide_ode_rhs ptr
-              initDifferentials <- liftIO $ compute_initial_differentials ptr u
-              return (ptr, funptrida, u, c_is_differential, initDifferentials)
+              initDifferentials <- liftIO $ compute_initial_differentials ptr odeUserData
+              return (ptr, funptrida, c_is_differential, initDifferentials)
             Ode -> do
-              return (ptr, nullFunPtr, u, mempty, mempty)
+              return (ptr, nullFunPtr, mempty, mempty)
         OdeRhsHaskell fun -> do
           let funIO :: OdeRhsCType
               funIO t y f userdata_ptr = do
@@ -392,16 +392,16 @@ withCConsts ODEOpts {..} OdeProblem {..} = runContT $ do
               -- If we don't know, let's assume that everything is differential
               let c_is_differential = VS.replicate dim 1.0
               initDifferentials <- liftIO $ compute_initial_differentials funptr nullPtr
-              return (funptr, funidaptr, nullPtr, c_is_differential, initDifferentials)
+              return (funptr, funidaptr, c_is_differential, initDifferentials)
             Ode -> do
               -- We will solve an ode problem, we don't care about the ida implementation
               funptr <- ContT $ bracket (mkOdeRhsC funIO) freeHaskellFunPtr
               let funidaptr = nullFunPtr
               -- We don't care about differential informations
               let c_is_differential = mempty
-              return (funptr, funidaptr, nullPtr, c_is_differential, mempty)
+              return (funptr, funidaptr, c_is_differential, mempty)
     ResidualProblemFunctions ResidualFunctions {..} -> do
-      (funidaptr, userdataptr) <- case odeResidual of
+      funidaptr <- case odeResidual of
         OdeResidualHaskell odeResidualF -> do
           let -- That's a correct residual function
               funIdaResidualIO = fn
@@ -421,9 +421,9 @@ withCConsts ODEOpts {..} OdeProblem {..} = runContT $ do
                             sunVecVals = res
                           }
           funptr <- ContT $ bracket (mkIDAResFn funIdaResidualIO) freeHaskellFunPtr
-          pure (funptr, nullPtr)
-        OdeResidualC funptr userdataptr -> pure (funptr, userdataptr)
-      return (nullFunPtr, funidaptr, userdataptr, VS.unsafeCoerceVector odeDifferentials, VS.unsafeCoerceVector odeInitialDifferentials)
+          pure funptr
+        OdeResidualC funptr -> pure funptr
+      return (nullFunPtr, funidaptr, VS.unsafeCoerceVector odeDifferentials, VS.unsafeCoerceVector odeInitialDifferentials)
   let c_ontimepoint = do
         case odeOnTimePoint of
           Nothing -> \_t _y _idx _diags -> pure ()
@@ -539,7 +539,7 @@ withCConsts ODEOpts {..} OdeProblem {..} = runContT $ do
             funidaptr <- ContT $ bracket (mkIDARootFn funIdaIO) freeHaskellFunPtr
             return (funptr, funidaptr)
 
-  return CConsts {..}
+  return CConsts {c_userdata=odeUserData, ..}
 
 -- | Wrapped to call the event condition directly from haskell code. This is
 -- used to wrap the event condition "ode" style in a "residual" style.
