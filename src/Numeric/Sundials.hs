@@ -258,6 +258,7 @@ withCConsts ODEOpts {..} OdeProblem {..} = runContT $ do
               yp_vec
               (VS.map fromIntegral event_indices :: VS.Vector Int)
               (\y -> VS.unsafeCoerceVector <$> (callback $ VS.unsafeCoerceVector y))
+              odeUserData
           poke y'_ptr $
             SunVector
               { sunVecN = sunVecN y_vec,
@@ -341,12 +342,12 @@ withCConsts ODEOpts {..} OdeProblem {..} = runContT $ do
               return (ptr, nullFunPtr, u, mempty, mempty)
         OdeRhsHaskell fun -> do
           let funIO :: OdeRhsCType
-              funIO t y f _ptr = do
+              funIO t y f userdata_ptr = do
                 sv <- peek y
 
                 -- Save the exception (if any)
                 saveExceptionContext exceptionRef $ do
-                  r <- fun t (sunVecVals sv)
+                  r <- fun t (sunVecVals sv) userdata_ptr
 
                   -- Note: the following operation will force "r"
                   -- and discover any hidden exception
@@ -359,13 +360,13 @@ withCConsts ODEOpts {..} OdeProblem {..} = runContT $ do
               -- In case the user does not provide a residual function, we build
               -- one from the ode rhs provided function.
               funIdaCompatIO :: IDAResFn
-              funIdaCompatIO t y yp f _ptr = do
+              funIdaCompatIO t y yp f userdata = do
                 -- Save the exception (if any)
                 saveExceptionContext exceptionRef $ do
                   sv <- peek y
                   svp <- peek yp
 
-                  ypComputed <- fun t (sunVecVals sv)
+                  ypComputed <- fun t (sunVecVals sv) userdata
                   -- The residual function is F(y, yp, t) = 0
                   -- However, we only have yp_rhs = f(y, t)
                   --
@@ -405,12 +406,12 @@ withCConsts ODEOpts {..} OdeProblem {..} = runContT $ do
           let -- That's a correct residual function
               funIdaResidualIO = fn
                 where
-                  fn t y yp residual _ptr = do
+                  fn t y yp residual userdata = do
                     -- Save the exception (if any)
                     saveExceptionContext exceptionRef $ do
                       sv <- peek y
                       svp <- peek yp
-                      res <- odeResidualF t (sunVecVals sv) (sunVecVals svp)
+                      res <- odeResidualF t (sunVecVals sv) (sunVecVals svp) userdata
 
                       -- Note: the following operation will force "res"
                       -- and discover any hidden exception
@@ -482,11 +483,11 @@ withCConsts ODEOpts {..} OdeProblem {..} = runContT $ do
             return (nullFunPtr, funptrida)
       EventConditionsHaskell f -> do
         let funIO :: EventConditionCType
-            funIO t y_ptr out_ptr _ptr = do
+            funIO t y_ptr out_ptr userdata = do
               y <- sunVecVals <$> peek y_ptr
 
               saveExceptionContext exceptionRef $ do
-                res <- f (coerce t) (VS.unsafeCoerceVector y)
+                res <- f (coerce t) (VS.unsafeCoerceVector y) userdata
                 -- FIXME: We should be able to use poke somehow
                 -- Note: the following operation will force "res"
                 -- and discover any hidden exception
@@ -494,11 +495,11 @@ withCConsts ODEOpts {..} OdeProblem {..} = runContT $ do
 
             -- TODO: the yp_ptr could be used in root functions
             funIdaIO :: IDARootFn
-            funIdaIO t y_ptr _yp_ptr out_ptr _ptr = do
+            funIdaIO t y_ptr _yp_ptr out_ptr userdata = do
               y <- sunVecVals <$> peek y_ptr
 
               saveExceptionContext exceptionRef $ do
-                res <- f (coerce t) (VS.unsafeCoerceVector y)
+                res <- f (coerce t) (VS.unsafeCoerceVector y) userdata
                 -- FIXME: We should be able to use poke somehow
                 -- Note: the following operation will force "res"
                 -- and discover any hidden exception
@@ -520,12 +521,12 @@ withCConsts ODEOpts {..} OdeProblem {..} = runContT $ do
             return (nullFunPtr, fptr)
       EventConditionsResidualHaskell f -> do
         let funIdaIO :: IDARootFn
-            funIdaIO t y_ptr yp_ptr out_ptr _ptr = do
+            funIdaIO t y_ptr yp_ptr out_ptr userdata = do
               y <- sunVecVals <$> peek y_ptr
               yp <- sunVecVals <$> peek yp_ptr
 
               saveExceptionContext exceptionRef $ do
-                res <- f (coerce t) (VS.unsafeCoerceVector y) (VS.unsafeCoerceVector yp)
+                res <- f (coerce t) (VS.unsafeCoerceVector y) (VS.unsafeCoerceVector yp) userdata
                 -- FIXME: We should be able to use poke somehow
                 -- Note: the following operation will force "res"
                 -- and discover any hidden exception

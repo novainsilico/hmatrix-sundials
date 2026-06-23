@@ -371,6 +371,8 @@ type EventHandler =
   -- it had done changes into the state variable which should be taken into
   -- account before next event.
   (VS.Vector Double -> IO (VS.Vector Double)) ->
+  -- | The data shared between all callbacks
+  Ptr UserData ->
   IO EventHandlerResult
 
 -- | This callback will be called when a timepoint is saved
@@ -485,18 +487,18 @@ data UserData
 --
 -- Can be either a Haskell function or a pointer to a C function.
 data OdeRhs
-  = OdeRhsHaskell (CDouble -> VS.Vector CDouble -> IO (VS.Vector CDouble))
+  = OdeRhsHaskell (CDouble -> VS.Vector CDouble -> Ptr UserData -> IO (VS.Vector CDouble))
   | OdeRhsC (FunPtr OdeRhsCType) (Ptr UserData)
 
 data OdeResidual
-  = OdeResidualHaskell (CDouble -> VS.Vector CDouble -> VS.Vector CDouble -> IO (VS.Vector CDouble))
+  = OdeResidualHaskell (CDouble -> VS.Vector CDouble -> VS.Vector CDouble -> Ptr UserData -> IO (VS.Vector CDouble))
   | OdeResidualC (FunPtr IDAResFn) (Ptr UserData)
 
 -- | A version of 'OdeRhsHaskell' that accepts a pure function
 odeRhsPure ::
   (CDouble -> VS.Vector CDouble -> VS.Vector CDouble) ->
   ProblemFunctions
-odeRhsPure f = OdeProblemFunctions $ OdeRhsHaskell $ \t y -> return $ f t y
+odeRhsPure f = OdeProblemFunctions $ OdeRhsHaskell $ \t y _userdata -> return $ f t y
 
 type OdeJacobianCType =
   -- | @realtype t@
@@ -580,15 +582,15 @@ type IDARootFn =
   IO CInt
 
 data EventConditions
-  = EventConditionsHaskell (Double -> VS.Vector Double -> IO (VS.Vector Double))
+  = EventConditionsHaskell (Double -> VS.Vector Double -> Ptr UserData -> IO (VS.Vector Double))
   | EventConditionsC (FunPtr EventConditionCType)
-  | EventConditionsResidualHaskell (Double -> VS.Vector Double -> VS.Vector Double -> IO (VS.Vector Double))
+  | EventConditionsResidualHaskell (Double -> VS.Vector Double -> VS.Vector Double -> Ptr UserData -> IO (VS.Vector Double))
   | EventConditionsResidualC (FunPtr IDARootFn)
 
 -- | A way to construct 'EventConditionsHaskell' when there is no shared
 -- computation among different functions
 eventConditionsPure :: V.Vector (Double -> VS.Vector Double -> Double) -> EventConditions
-eventConditionsPure conds = EventConditionsHaskell $ \t y ->
+eventConditionsPure conds = EventConditionsHaskell $ \t y _userdata ->
   pure $ V.convert $ V.map (\cond -> cond t y) conds
 
 data SundialsDiagnostics = SundialsDiagnostics
