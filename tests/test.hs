@@ -40,6 +40,7 @@ import Test.Tasty.Golden.Advanced
 import Test.Tasty.HUnit
 import Text.Printf (printf)
 import Prelude hiding (quot, showList)
+import Foreign.Ptr (nullPtr)
 
 ----------------------------------------------------------------------
 --                            Helpers
@@ -59,7 +60,8 @@ emptyOdeProblem =
       odeSolTimes = error "emptyOdeProblem: no odeSolTimes provided",
       odeTolerances = defaultTolerances,
       -- TODO: test this callback
-      odeOnTimePoint = Nothing
+      odeOnTimePoint = Nothing,
+      odeUserData = nullPtr
     }
 
 data OdeSolver
@@ -225,7 +227,7 @@ mkEventHandler ::
   -- | record the event?
   V.Vector Bool ->
   EventHandler
-mkEventHandler handlers stop_solver_vec record_event_vec t y0 _yp evs callback
+mkEventHandler handlers stop_solver_vec record_event_vec t y0 _yp evs callback _userdata
   | VS.null evs = error "mkEventHandler: got a time-based event"
   | otherwise = do
       let newState = foldl' (\y hndl -> hndl t y) y0 . map (handlers V.!) $ VS.toList evs
@@ -245,7 +247,7 @@ mkTimeEvents ::
 mkTimeEvents time_based_events = do
   time_based_events_ref <- newIORef time_based_events
   let handler :: EventHandler
-      handler t y0 _yp evs callback =
+      handler t y0 _yp evs callback _userdata =
         if VS.null evs
           then do
             time_evs <- readIORef time_based_events_ref
@@ -289,7 +291,7 @@ combineEventHandlers rh th t y0 yp evs =
     else rh t y0 yp evs
 
 nilEventHandler :: EventHandler
-nilEventHandler _ _ _ _ _ = throwIO $ ErrorCall "nilEventHandler"
+nilEventHandler _ _ _ _ _ _ = throwIO $ ErrorCall "nilEventHandler"
 
 ----------------------------------------------------------------------
 --                             The tests
@@ -358,7 +360,7 @@ idaTests =
                 { odeFunctions =
                     ResidualProblemFunctions
                       ResidualFunctions
-                        { odeResidual = OdeResidualHaskell $ \_t _y yp -> pure (VS.map (subtract 1) yp),
+                        { odeResidual = OdeResidualHaskell $ \_t _y yp _userdata -> pure (VS.map (subtract 1) yp),
                           odeDifferentials = VS.fromList [1.0],
                           odeInitialDifferentials = VS.fromList [1.0]
                         },
@@ -377,7 +379,7 @@ idaTests =
                 { odeFunctions =
                     ResidualProblemFunctions
                       ResidualFunctions
-                        { odeResidual = OdeResidualHaskell $ \_t y yp -> pure ([yp VS.! 0 - 1, y VS.! 0 + y VS.! 1]),
+                        { odeResidual = OdeResidualHaskell $ \_t y yp _userdata -> pure ([yp VS.! 0 - 1, y VS.! 0 + y VS.! 1]),
                           odeDifferentials = VS.fromList [0.0, 1.0],
                           odeInitialDifferentials = VS.fromList [1.0, -1.0]
                         },
@@ -403,7 +405,7 @@ idaTests =
                 { odeFunctions =
                     ResidualProblemFunctions
                       ResidualFunctions
-                        { odeResidual = OdeResidualHaskell $ \_t y _yp -> pure ([y VS.! 0 - 2]),
+                        { odeResidual = OdeResidualHaskell $ \_t y _yp _userdata -> pure ([y VS.! 0 - 2]),
                           odeDifferentials = VS.fromList [0.0],
                           odeInitialDifferentials = VS.fromList [25.0]
                         },
@@ -443,7 +445,7 @@ idaTests =
                 { odeFunctions =
                     ResidualProblemFunctions
                       ResidualFunctions
-                        { odeResidual = OdeResidualHaskell $ \_t y yp ->
+                        { odeResidual = OdeResidualHaskell $ \_t y yp _userdata ->
                             pure
                               ( [ -- dx/dt - 1 = 0
                                   yp VS.! 0 - 1,
@@ -501,7 +503,7 @@ idaTests =
                 { odeFunctions =
                     ResidualProblemFunctions
                       ResidualFunctions
-                        { odeResidual = OdeResidualHaskell $ \_t y yp ->
+                        { odeResidual = OdeResidualHaskell $ \_t y yp _userdata ->
                             pure
                               ( [ -- dx/dt - 1 = 0
                                   yp VS.! 0 - 1,
@@ -549,7 +551,7 @@ idaTests =
                 { odeFunctions =
                     ResidualProblemFunctions
                       ResidualFunctions
-                        { odeResidual = OdeResidualHaskell $ \_t y yp ->
+                        { odeResidual = OdeResidualHaskell $ \_t y yp _userdata ->
                             pure
                               ( [ yp VS.! 0 - 1,
                                   y VS.! 0 + abs (y VS.! 1)
@@ -581,7 +583,7 @@ idaTests =
                 { odeFunctions =
                     ResidualProblemFunctions
                       ResidualFunctions
-                        { odeResidual = OdeResidualHaskell $ \_t y yp ->
+                        { odeResidual = OdeResidualHaskell $ \_t y yp _userdata ->
                             pure
                               ( [ yp VS.! 0 - 1,
                                   y VS.! 0 + log (y VS.! 1)
@@ -708,7 +710,7 @@ eventTests opts =
             solve
               opts
               ( boundedSine
-                  { odeFunctions = OdeProblemFunctions $ OdeRhsHaskell $ \_ _ -> return $ throw ConditionException
+                  { odeFunctions = OdeProblemFunctions $ OdeRhsHaskell $ \_ _ _ -> return $ throw ConditionException
                   }
               ),
       testCase "impure exception in rhs" $
@@ -717,7 +719,7 @@ eventTests opts =
             solve
               opts
               ( boundedSine
-                  { odeFunctions = OdeProblemFunctions $ OdeRhsHaskell $ \_ _ -> throwIO ConditionException
+                  { odeFunctions = OdeProblemFunctions $ OdeRhsHaskell $ \_ _ _ -> throwIO ConditionException
                   }
               ),
       testCase "pure exception in event handler" $

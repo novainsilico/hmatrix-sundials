@@ -123,6 +123,7 @@ withNVector_Serial t suncontext errCode f = do
         pure res
   bracket create cN_VDestroy f
 
+{-# INLINE cNV_Ith_S #-}
 -- | Set element of a vector
 cNV_Ith_S :: N_Vector -> Int -> CDouble -> IO ()
 cNV_Ith_S (N_Vector ptr) i v = do
@@ -130,6 +131,7 @@ cNV_Ith_S (N_Vector ptr) i v = do
   rtr <- getData qtr
   pokeElemOff rtr i v
 
+{-# INLINE cNV_Ith_S' #-}
 -- | Get element of a vector
 cNV_Ith_S' :: N_Vector -> Int -> IO CDouble
 cNV_Ith_S' (N_Vector ptr) i = do
@@ -347,9 +349,9 @@ class Sundials t where
 
   sundialsSetInitStep :: SolverObject t -> CDouble -> IO (Flag t)
 
+{-# INLINE cvGet #-}
 -- | Use a sundial getter to recover a value and throw an error if it fails
 --
--- TODO: should we inline or specialize these functions?
 cvGet ::
   (IsLabel "SUCCESS" (Flag t), HasCallStack, Storable b) =>
   (SolverObject t -> Ptr b -> IO (Flag t)) -> (SolverObject t) -> IO b
@@ -360,7 +362,7 @@ cvGet getter cvode_mem = do
       error $ "Failure during cvGet"
     peek ptr
 
--- | TODO: should we inline or specialize these functions?
+{-# INLINE check #-}
 check :: (IsLabel "SUCCESS" (Flag t), HasCallStack) => Int -> Flag t -> IO ()
 check retCode status
   | status == #SUCCESS = pure ()
