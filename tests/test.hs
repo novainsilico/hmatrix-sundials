@@ -306,7 +306,7 @@ main = do
 
   defaultMain $
     testGroup "Tests" $
-      [idaTests]
+      [idaTests, negativeSolvingTime]
         <> [ testGroup
                solver_name
                [ testGroup (show method) $
@@ -334,6 +334,25 @@ main = do
                ]
            | OdeSolver solver_name methods <- availableSolvers
            ]
+
+negativeSolvingTime :: (?log_env :: LogEnv) => TestTree
+negativeSolvingTime =
+  testGroup "Negative solving time" $
+    [ testCase "simple negative" $ do
+        Right r <-
+          runKatipT ?log_env $
+            solve (defaultOpts (IDAMethod IDADefault)) $
+              emptyOdeProblem
+                { odeFunctions = odeRhsPure $ \_t _y -> [1],
+                  odeJacobian = Nothing,
+                  odeInitCond = [0],
+                  odeSolTimes = VS.fromList [0, -1, -2, -3, -4, -5],
+                  odeTolerances = defaultTolerances {absTolerances = Left 1e-12}
+                }
+
+        -- dx/dt = 1, x(0) = 0 -> decreasing to -5
+        solutionMatrix r @=? fromColumns [VS.fromList [0.0, -1, -2, -3, -4, -5]]
+        ]
 
 idaTests :: (?log_env :: LogEnv) => TestTree
 idaTests =
